@@ -180,9 +180,19 @@ h1, h2, h3 { font-family: "Nunito", "Nunito Sans", system-ui, sans-serif; }
 .act .texte { user-select: text; }
 .act.en-glissement { opacity: .35; }
 
+/* Trait d'insertion pendant le glisser : montre où l'activité va se poser. */
+.act.insert-avant::after, .act.insert-apres::after,
+.mini.insert-avant::after, .mini.insert-apres::after {
+  content: ""; position: absolute; left: 2px; right: 2px; height: 3px;
+  background: var(--ink-2); border-radius: 2px; pointer-events: none;
+}
+.act.insert-avant::after, .mini.insert-avant::after { top: -4px; }
+.act.insert-apres::after, .mini.insert-apres::after { bottom: -4px; }
+
 .act-actions {
-  position: absolute; right: 5px; top: 4px; display: flex; gap: 1px;
+  position: absolute; right: 4px; top: 3px; display: flex; gap: 1px;
   opacity: 0; transition: opacity .12s;
+  background-color: inherit; border-radius: 999px; padding-left: 6px;
 }
 .act:hover .act-actions, .act:focus-within .act-actions, .act:focus-visible .act-actions { opacity: 1; }
 .act-actions button {
@@ -190,8 +200,16 @@ h1, h2, h3 { font-family: "Nunito", "Nunito Sans", system-ui, sans-serif; }
   font-size: 13px; line-height: 1; color: currentColor; opacity: .6;
 }
 .act-actions button[data-supprimer] { font-size: 17px; }
+.act-actions button[data-monter], .act-actions button[data-descendre] { font-size: 12px; }
+.act-actions button[disabled] { opacity: .2; cursor: default; }
+.act-actions button[disabled]:hover { background: none; }
+
 .act-actions button:hover { opacity: 1; background: color-mix(in srgb, currentColor 18%, transparent); }
-@media (hover: none) { .act-actions { opacity: .75; } }
+@media (hover: none) {
+  .act-actions { opacity: .75; }
+  .act { padding-right: 46px; }
+  .act.ordonnable { padding-right: 92px; }
+}
 .act .qui { font-weight: 800; font-size: 11px; letter-spacing: .04em; flex: none; padding-top: 1px; opacity: .8; }
 .act.gael { background: var(--gael-bg); color: var(--gael); }
 .act.ingrid { background: var(--ingrid-bg); color: var(--ingrid); }
@@ -259,6 +277,7 @@ h1, h2, h3 { font-family: "Nunito", "Nunito Sans", system-ui, sans-serif; }
   display: block; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-weight: 600; cursor: pointer; transition: opacity .12s;
 }
+.case-mois .mini { position: relative; }
 .case-mois .mini.en-glissement { opacity: .35; }
 .case-mois .mini.gael { background: var(--gael-bg); color: var(--gael); }
 .case-mois .mini.ingrid { background: var(--ingrid-bg); color: var(--ingrid); }
@@ -324,6 +343,7 @@ h1, h2, h3 { font-family: "Nunito", "Nunito Sans", system-ui, sans-serif; }
   .bandeau-mois { gap: 4px; margin-top: 26px; }
   .bandeau-mois .reserve-mois { margin-left: 0; flex-basis: 100%; }
   .jours { grid-template-columns: 1fr; gap: 8px; }
+
   .jour { min-height: 0; }
   .jour.ferme { display: none; }
   .marque span { display: none; }

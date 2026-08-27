@@ -133,7 +133,8 @@ function majHistorique() {
 /* ----------------------------------------------------- Supabase : lecture */
 async function charger() {
   const [acts, res] = await Promise.all([
-    sb.from("activites").select("id, jour, qui, texte, statut, origine"),
+    sb.from("activites").select("id, jour, qui, texte, statut, origine, rang")
+      .order("jour").order("rang"),
     sb.from("weekends_reserves").select("samedi"),
   ]);
   if (acts.error || res.error) throw (acts.error || res.error);
@@ -141,7 +142,14 @@ async function charger() {
   const parJour = {};
   for (const a of acts.data) {
     if (!parJour[a.jour]) parJour[a.jour] = [];
-    parJour[a.jour].push({ id: a.id, qui: a.qui, texte: a.texte, statut: a.statut, origine: a.origine });
+    parJour[a.jour].push({
+      id: a.id, qui: a.qui, texte: a.texte, statut: a.statut,
+      origine: a.origine, rang: a.rang == null ? parJour[a.jour].length : a.rang,
+    });
+  }
+  for (const liste of Object.values(parJour)) {
+    liste.sort((x, y) => x.rang - y.rang);
+    liste.forEach((a, i) => { a.rang = i; });
   }
   ETAT.activites = parJour;
   ETAT.reserves = res.data.map((r) => r.samedi).sort();
@@ -152,13 +160,17 @@ async function charger() {
 function indexer(activites) {
   const index = {};
   for (const [jour, liste] of Object.entries(activites)) {
-    for (const a of liste) index[a.id] = { jour, qui: a.qui, texte: a.texte, statut: a.statut, origine: a.origine || null };
+    for (const a of liste) index[a.id] = {
+      jour, qui: a.qui, texte: a.texte, statut: a.statut,
+      origine: a.origine || null, rang: a.rang || 0,
+    };
   }
   return index;
 }
 
 function memeActivite(a, b) {
-  return a.jour === b.jour && a.qui === b.qui && a.texte === b.texte && a.statut === b.statut;
+  return a.jour === b.jour && a.qui === b.qui && a.texte === b.texte
+      && a.statut === b.statut && a.rang === b.rang;
 }
 
 let minuteurPoussee = null;
@@ -406,7 +418,8 @@ function celluleJour(j) {
       <span class="jour-date">${echapper(j.label)}</span></div></div>`;
   }
   const ferie = j.ferie ? `<span class="jour-ferie">${echapper(j.ferie)}</span>` : "";
-  const actes = actesDe(j.iso).map((a) => vignetteActivite(a, j.iso)).join("");
+  const liste = actesDe(j.iso);
+  const actes = liste.map((a, i) => vignetteActivite(a, j.iso, i, liste.length)).join("");
   const coller = pressePapier
     ? `<button class="coller" data-coller="${j.iso}">Coller « ${echapper(tronquer(pressePapier.texte, 22))} »</button>`
     : "";
@@ -419,8 +432,10 @@ function celluleJour(j) {
   </div>`;
 }
 
-function vignetteActivite(a, iso) {
-  const classes = ["act", a.qui, a.statut === "a_confirmer" ? "a_confirmer" : ""].filter(Boolean).join(" ");
+function vignetteActivite(a, iso, index, total) {
+  const ordonnable = total > 1;
+  const classes = ["act", a.qui, a.statut === "a_confirmer" ? "a_confirmer" : "",
+                   ordonnable ? "ordonnable" : ""].filter(Boolean).join(" ");
   const verrou = a.origine === "scout" ? `<span class="verrou" title="Programme scout">🔒</span>` : "";
   const suffixe = a.statut === "a_confirmer" ? " · à confirmer" : "";
   const ref = `${iso}|${a.id}`;
@@ -430,6 +445,11 @@ function vignetteActivite(a, iso) {
     <span class="qui">${NOM[a.qui] ? NOM[a.qui][0] : "?"}</span>
     <span class="texte">${echapper(a.texte)}${suffixe}</span>${verrou}
     <span class="act-actions">
+      ${ordonnable ? `
+      <button data-monter="${ref}" title="Monter" aria-label="Monter dans la journée"
+        ${index === 0 ? "disabled" : ""}>↑</button>
+      <button data-descendre="${ref}" title="Descendre" aria-label="Descendre dans la journée"
+        ${index === total - 1 ? "disabled" : ""}>↓</button>` : ""}
       <button data-copier="${ref}" title="Copier" aria-label="Copier l'activité">⧉</button>
       <button data-supprimer="${ref}" title="Supprimer" aria-label="Supprimer l'activité">×</button>
     </span>
@@ -591,7 +611,8 @@ function validerModale(voile) {
     const liste = ETAT.activites[iso];
     const existante = id ? liste.find((a) => a.id === id) : null;
     if (existante) { existante.qui = qui; existante.texte = texte; existante.statut = statut; }
-    else liste.push({ id: idUnique(), qui, texte, statut });
+    else liste.push({ id: idUnique(), qui, texte, statut, rang: liste.length });
+    reordonner(iso);
   });
 }
 
@@ -599,6 +620,7 @@ function supprimerActivite(iso, id) {
   appliquer(() => {
     ETAT.activites[iso] = actesDe(iso).filter((a) => a.id !== id);
     if (!ETAT.activites[iso].length) delete ETAT.activites[iso];
+    else reordonner(iso);
   });
 }
 
@@ -607,6 +629,12 @@ function basculerReserve(sam) {
     if (estReserve(sam)) ETAT.reserves = ETAT.reserves.filter((s) => s !== sam);
     else ETAT.reserves = [...ETAT.reserves, sam].sort();
   });
+}
+
+/* Renumerote les activites d'un jour : 0, 1, 2… C'est ce rang qui fait foi. */
+function reordonner(iso) {
+  const liste = ETAT.activites[iso];
+  if (liste) liste.forEach((a, i) => { a.rang = i; });
 }
 
 /* ------------------------------------------------ copier, coller, deplacer */
@@ -625,23 +653,56 @@ function collerActivite(iso) {
   appliquer(() => {
     if (!ETAT.activites[iso]) ETAT.activites[iso] = [];
     ETAT.activites[iso].push(copie);
+    reordonner(iso);
   });
 }
 
-function deplacerActivite(isoSource, id, isoCible, dupliquer) {
-  if (!isoCible || (isoSource === isoCible && !dupliquer)) return;
-  const source = actesDe(isoSource);
-  const a = source.find((x) => x.id === id);
+/* Deplace une activite : vers un autre jour, ou a une autre place dans le meme
+   jour. `idVoisin` et `avant` designent le point d'insertion ; sans eux,
+   l'activite est ajoutee a la fin. Alt enfoncee = duplication. */
+function deplacerActivite(isoSource, id, isoCible, dupliquer, idVoisin, avant) {
+  if (!isoCible) return;
+  if (id === idVoisin && !dupliquer) return;
+  if (isoSource === isoCible && !dupliquer && !idVoisin) return;
+
+  const a = actesDe(isoSource).find((x) => x.id === id);
   if (!a) return;
+
   appliquer(() => {
+    const objet = dupliquer
+      ? { id: idUnique(), qui: a.qui, texte: a.texte, statut: a.statut }
+      : a;
+
     if (!dupliquer) {
-      ETAT.activites[isoSource] = source.filter((x) => x.id !== id);
+      ETAT.activites[isoSource] = actesDe(isoSource).filter((x) => x.id !== id);
       if (!ETAT.activites[isoSource].length) delete ETAT.activites[isoSource];
     }
+
     if (!ETAT.activites[isoCible]) ETAT.activites[isoCible] = [];
-    ETAT.activites[isoCible].push(dupliquer
-      ? { id: idUnique(), qui: a.qui, texte: a.texte, statut: a.statut }
-      : a);
+    const cible = ETAT.activites[isoCible];
+
+    let index = cible.length;
+    if (idVoisin) {
+      const i = cible.findIndex((x) => x.id === idVoisin);
+      if (i >= 0) index = avant ? i : i + 1;
+    }
+    cible.splice(index, 0, objet);
+
+    reordonner(isoSource);
+    reordonner(isoCible);
+  });
+}
+
+/* Monter / descendre d'un cran — meme resultat que le glisser, mais au doigt. */
+function decalerActivite(iso, id, pas) {
+  const liste = actesDe(iso);
+  const i = liste.findIndex((a) => a.id === id);
+  const j = i + pas;
+  if (i < 0 || j < 0 || j >= liste.length) return;
+  appliquer(() => {
+    const liste = ETAT.activites[iso];
+    [liste[i], liste[j]] = [liste[j], liste[i]];
+    reordonner(iso);
   });
 }
 
@@ -717,6 +778,20 @@ function brancherContenu() {
       copierActivite(iso, id);
     }));
 
+  zone.querySelectorAll("[data-monter]").forEach((b) =>
+    b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const [iso, id] = b.dataset.monter.split("|");
+      decalerActivite(iso, id, -1);
+    }));
+
+  zone.querySelectorAll("[data-descendre]").forEach((b) =>
+    b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const [iso, id] = b.dataset.descendre.split("|");
+      decalerActivite(iso, id, 1);
+    }));
+
   zone.querySelectorAll("[data-supprimer]").forEach((b) =>
     b.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -756,6 +831,42 @@ function brancherContenu() {
       glisse = null;
       el.classList.remove("en-glissement");
       zone.querySelectorAll(".survol").forEach((x) => x.classList.remove("survol"));
+      zone.querySelectorAll(".insert-avant, .insert-apres")
+        .forEach((x) => x.classList.remove("insert-avant", "insert-apres"));
+    });
+
+    /* Deposer sur une activite l'insere juste avant ou juste apres elle :
+       c'est ce qui permet de ranger une journee a la main. */
+    el.addEventListener("dragover", (e) => {
+      if (!glisse) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const [isoEl, idEl] = el.dataset.glisser.split("|");
+      if (idEl === glisse.id) return;
+      const cadre = el.getBoundingClientRect();
+      const avant = e.clientY < cadre.top + cadre.height / 2;
+      e.dataTransfer.dropEffect = (e.altKey || e.ctrlKey || e.metaKey) ? "copy" : "move";
+      el.classList.toggle("insert-avant", avant);
+      el.classList.toggle("insert-apres", !avant);
+      const parent = el.closest("[data-depot]");
+      if (parent) parent.classList.remove("survol");
+    });
+
+    el.addEventListener("dragleave", () => {
+      el.classList.remove("insert-avant", "insert-apres");
+    });
+
+    el.addEventListener("drop", (e) => {
+      if (!glisse) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const avant = el.classList.contains("insert-avant");
+      el.classList.remove("insert-avant", "insert-apres");
+      const [isoEl, idEl] = el.dataset.glisser.split("|");
+      if (idEl === glisse.id) { glisse = null; return; }
+      const dupliquer = e.altKey || e.ctrlKey || e.metaKey;
+      deplacerActivite(glisse.iso, glisse.id, isoEl, dupliquer, idEl, avant);
+      glisse = null;
     });
   });
 
