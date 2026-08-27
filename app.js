@@ -19,7 +19,7 @@ const MOIS_NOMS = ["janvier", "février", "mars", "avril", "mai", "juin",
 
 let pressePapier = null;          // activite copiee, en attente de collage
 let glisse = null;                // activite en cours de deplacement
-let chronoGlisser = null;         // garde-fou si dragend ne se declenche jamais
+let chronoGlisser = null;         // garde-fou si le geste ne se termine jamais
 let renduDiffere = false;         // un rendu a ete demande pendant un glisser
 let rechargementDiffere = false;  // idem pour un rechargement depuis la base
 const HISTORIQUE = { pile: [], position: -1 };
@@ -447,19 +447,19 @@ function vignetteActivite(a, iso, index, total) {
   const suffixe = a.statut === "a_confirmer" ? " · à confirmer" : "";
   const ref = `${iso}|${a.id}`;
   return `<div class="${classes}" data-modifier="${ref}" data-glisser="${ref}"
-       draggable="true" tabindex="0" role="button"
+       tabindex="0" role="button"
        aria-label="${echapper(NOM[a.qui] + " : " + a.texte)}">
     <span class="qui">${NOM[a.qui] ? NOM[a.qui][0] : "?"}</span>
     <span class="texte">${echapper(a.texte)}${suffixe}</span>${verrou}
     <span class="act-actions">
       ${ordonnable ? `
-      <button draggable="false" data-monter="${ref}" title="Monter"
+      <button data-monter="${ref}" title="Monter"
         aria-label="Monter dans la journée" ${index === 0 ? "disabled" : ""}>↑</button>
-      <button draggable="false" data-descendre="${ref}" title="Descendre"
+      <button data-descendre="${ref}" title="Descendre"
         aria-label="Descendre dans la journée" ${index === total - 1 ? "disabled" : ""}>↓</button>` : ""}
-      <button draggable="false" data-copier="${ref}" title="Copier"
+      <button data-copier="${ref}" title="Copier"
         aria-label="Copier l'activité">⧉</button>
-      <button draggable="false" data-supprimer="${ref}" title="Supprimer"
+      <button data-supprimer="${ref}" title="Supprimer"
         aria-label="Supprimer l'activité">×</button>
     </span>
   </div>`;
@@ -523,7 +523,7 @@ function caseMois(d, moisRef) {
   const actes = actesDe(iso)
     .filter((a) => correspond(a.texte) || correspond(NOM[a.qui]))
     .map((a) => `<div class="mini ${a.qui}${a.statut === "a_confirmer" ? " a_confirmer" : ""}"
-        data-modifier="${iso}|${a.id}" data-glisser="${iso}|${a.id}" draggable="true" tabindex="0" role="button"
+        data-modifier="${iso}|${a.id}" data-glisser="${iso}|${a.id}" tabindex="0" role="button"
         title="${echapper(NOM[a.qui] + " — " + a.texte)}">${echapper(a.texte)}</div>`).join("");
 
   const ajout = info.ouvert
@@ -652,14 +652,10 @@ function nettoyerIndicateurs() {
     .forEach((x) => x.classList.remove("en-glissement", "survol", "insert-avant", "insert-apres"));
 }
 
-/* Fin du geste : on nettoie, puis on rejoue ce qui avait ete mis en attente. */
-function finDeGlisser() {
-  glisse = null;
-  clearTimeout(chronoGlisser);
-  nettoyerIndicateurs();
-
-  /* On desarme les deux drapeaux avant d'agir : un rechargement redessine de
-     toute facon, mais laisser l'autre arme fausserait le geste suivant. */
+/* Rejoue ce qui a ete mis en attente pendant le geste. On desarme les deux
+   drapeaux avant d'agir : un rechargement redessine de toute facon, mais
+   laisser l'autre arme fausserait le geste suivant. */
+function viderDifferes() {
   const rechargement = rechargementDiffere;
   const rendu = renduDiffere;
   rechargementDiffere = false;
@@ -762,6 +758,180 @@ function exporterExcel() {
   setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
 
+
+/* ====================================================================== */
+/*  Glisser-deposer au pointeur                                           */
+/*                                                                        */
+/*  Le glisser-deposer HTML5 est ecarte : Safari le prend en defaut et    */
+/*  fige la page. On suit donc le pointeur nous-memes, ce qui donne un    */
+/*  comportement identique dans tous les navigateurs.                     */
+/*  Souris et stylet uniquement : au doigt, ce sont les fleches ↑ ↓ qui   */
+/*  rangent la journee.                                                   */
+/* ====================================================================== */
+
+/* Horodatage plutot qu'un drapeau : apres un glisser, la page est redessinee et
+   le clic qui suit vise un element disparu. Un drapeau ne serait jamais consomme
+   et avalerait le clic suivant ; un horodatage expire tout seul. */
+let finDuGeste = 0;
+
+const TIRAGE = {
+  element: null, iso: null, id: null, pointerId: null,
+  x0: 0, y0: 0, decalageX: 0, decalageY: 0,
+  fantome: null, cible: null, avant: false, jour: null, actif: false,
+};
+
+function preparerTirage(e, el) {
+  if (e.pointerType === "touch") return;            // au doigt : fleches ↑ ↓
+  if (e.button !== 0) return;
+  if (e.target.closest(".act-actions")) return;
+
+  const [iso, id] = el.dataset.glisser.split("|");
+  Object.assign(TIRAGE, {
+    element: el, iso, id, pointerId: e.pointerId,
+    x0: e.clientX, y0: e.clientY,
+    cible: null, avant: false, jour: null, actif: false,
+  });
+
+  window.addEventListener("pointermove", surDeplacement);
+  window.addEventListener("pointerup", surRelachement);
+  window.addEventListener("pointercancel", abandonnerTirage);
+  window.addEventListener("keydown", echapTirage);
+}
+
+function demarrerTirage() {
+  TIRAGE.actif = true;
+  glisse = { iso: TIRAGE.iso, id: TIRAGE.id };      // gele les rendus pendant le geste
+
+  const cadre = TIRAGE.element.getBoundingClientRect();
+  TIRAGE.decalageX = TIRAGE.x0 - cadre.left;
+  TIRAGE.decalageY = TIRAGE.y0 - cadre.top;
+
+  const fantome = TIRAGE.element.cloneNode(true);
+  fantome.classList.add("fantome");
+  fantome.classList.remove("insert-avant", "insert-apres");
+  fantome.style.width = cadre.width + "px";
+  document.body.appendChild(fantome);
+  TIRAGE.fantome = fantome;
+
+  TIRAGE.element.classList.add("en-glissement");
+  document.body.classList.add("glisser-en-cours");
+
+  clearTimeout(chronoGlisser);
+  chronoGlisser = setTimeout(abandonnerTirage, 30000);
+}
+
+function placerFantome(x, y) {
+  TIRAGE.fantome.style.transform =
+    `translate3d(${Math.round(x - TIRAGE.decalageX)}px, ${Math.round(y - TIRAGE.decalageY)}px, 0)`;
+}
+
+/* On ne touche au DOM que si la destination a reellement change : sans cette
+   precaution, chaque mouvement de souris redessinerait la page. */
+function viserDestination(x, y) {
+  const sous = document.elementFromPoint(x, y);
+  const vignette = sous ? sous.closest("[data-glisser]") : null;
+  let cible = null, avant = false, jour = null;
+
+  if (vignette && vignette !== TIRAGE.element) {
+    const cadre = vignette.getBoundingClientRect();
+    cible = vignette;
+    avant = y < cadre.top + cadre.height / 2;
+  } else if (!vignette) {
+    jour = sous ? sous.closest("[data-depot]") : null;
+  }
+
+  if (cible === TIRAGE.cible && avant === TIRAGE.avant && jour === TIRAGE.jour) return;
+
+  if (TIRAGE.cible) TIRAGE.cible.classList.remove("insert-avant", "insert-apres");
+  if (TIRAGE.jour) TIRAGE.jour.classList.remove("survol");
+
+  if (cible) {
+    cible.classList.add(avant ? "insert-avant" : "insert-apres");
+    cible.classList.remove(avant ? "insert-apres" : "insert-avant");
+  }
+  if (jour) jour.classList.add("survol");
+
+  TIRAGE.cible = cible;
+  TIRAGE.avant = avant;
+  TIRAGE.jour = jour;
+}
+
+/* Fait defiler la page quand on approche du bord : sans cela, impossible de
+   deposer une activite sur un week-end hors ecran. */
+function defilerSiBesoin(y) {
+  const marge = 80, vitesse = 16;
+  if (y < marge) window.scrollBy(0, -vitesse);
+  else if (y > window.innerHeight - marge) window.scrollBy(0, vitesse);
+}
+
+function surDeplacement(e) {
+  if (e.pointerId !== TIRAGE.pointerId) return;
+
+  if (!TIRAGE.actif) {
+    const distance = Math.hypot(e.clientX - TIRAGE.x0, e.clientY - TIRAGE.y0);
+    if (distance < 6) return;                       // simple clic, pas un glisser
+    demarrerTirage();
+  }
+
+  e.preventDefault();
+  placerFantome(e.clientX, e.clientY);
+  viserDestination(e.clientX, e.clientY);
+  defilerSiBesoin(e.clientY);
+}
+
+function rangerTirage() {
+  window.removeEventListener("pointermove", surDeplacement);
+  window.removeEventListener("pointerup", surRelachement);
+  window.removeEventListener("pointercancel", abandonnerTirage);
+  window.removeEventListener("keydown", echapTirage);
+  clearTimeout(chronoGlisser);
+
+  if (TIRAGE.fantome) TIRAGE.fantome.remove();
+  document.body.classList.remove("glisser-en-cours");
+  nettoyerIndicateurs();
+
+  TIRAGE.element = null;
+  TIRAGE.fantome = null;
+  TIRAGE.actif = false;
+  glisse = null;
+}
+
+function surRelachement(e) {
+  if (e.pointerId !== TIRAGE.pointerId) return;
+
+  const actif = TIRAGE.actif;
+  const depart = { iso: TIRAGE.iso, id: TIRAGE.id };
+  const cible = TIRAGE.cible;
+  const jour = TIRAGE.jour;
+  const avant = TIRAGE.avant;
+  const dupliquer = e.altKey || e.ctrlKey || e.metaKey;
+
+  rangerTirage();
+
+  if (actif) {
+    finDuGeste = Date.now();                        // le clic qui suit n'ouvre pas la fiche
+    if (cible) {
+      const [isoCible, idCible] = cible.dataset.glisser.split("|");
+      if (idCible !== depart.id) {
+        deplacerActivite(depart.iso, depart.id, isoCible, dupliquer, idCible, avant);
+      }
+    } else if (jour) {
+      deplacerActivite(depart.iso, depart.id, jour.dataset.depot, dupliquer);
+    }
+  }
+
+  viderDifferes();
+}
+
+function abandonnerTirage() {
+  rangerTirage();
+  viderDifferes();
+}
+
+function echapTirage(e) {
+  if (e.key === "Escape") abandonnerTirage();
+}
+
 /* ------------------------------------------------------------- branchements */
 function brancherBarre() {
   $("#onglet-weekends").addEventListener("click", () => { vue.onglet = "weekends"; rendre(); });
@@ -834,8 +1004,7 @@ function brancherContenu() {
   zone.querySelectorAll("[data-modifier]").forEach((b) => {
     b.addEventListener("click", (e) => {
       if (e.target.closest(".act-actions")) return;
-      const selection = window.getSelection && window.getSelection().toString();
-      if (selection && b.contains(window.getSelection().anchorNode)) return;  // l'utilisateur selectionne du texte
+      if (Date.now() - finDuGeste < 300) return;
       const [iso, id] = b.dataset.modifier.split("|");
       ouvrirModale({ iso, id });
     });
@@ -850,85 +1019,10 @@ function brancherContenu() {
   zone.querySelectorAll("[data-reserver]").forEach((b) =>
     b.addEventListener("click", () => basculerReserve(b.dataset.reserver)));
 
-  /* --- glisser-deposer : deplacer une activite, ou la dupliquer avec Alt --- */
+  /* Le glisser-deposer est gere au pointeur (voir plus bas), il suffit ici
+     d'armer chaque vignette. */
   zone.querySelectorAll("[data-glisser]").forEach((el) => {
-    el.addEventListener("dragstart", (e) => {
-      const [iso, id] = el.dataset.glisser.split("|");
-      glisse = { iso, id };
-      const a = actesDe(iso).find((x) => x.id === id);
-      e.dataTransfer.effectAllowed = "copyMove";
-      e.dataTransfer.setData("text/plain", a ? a.texte : "");
-      el.classList.add("en-glissement");
-      /* Si le navigateur oublie de signaler la fin du geste, on se debloque seuls. */
-      clearTimeout(chronoGlisser);
-      chronoGlisser = setTimeout(finDeGlisser, 30000);
-    });
-
-    el.addEventListener("dragend", finDeGlisser);
-
-    /* Deposer sur une activite l'insere juste avant ou juste apres elle :
-       c'est ce qui permet de ranger une journee a la main. */
-    el.addEventListener("dragover", (e) => {
-      if (!glisse) return;
-      e.preventDefault();
-      e.stopPropagation();
-      const [isoEl, idEl] = el.dataset.glisser.split("|");
-      if (idEl === glisse.id) return;
-      const cadre = el.getBoundingClientRect();
-      const avant = e.clientY < cadre.top + cadre.height / 2;
-      e.dataTransfer.dropEffect = (e.altKey || e.ctrlKey || e.metaKey) ? "copy" : "move";
-      el.classList.toggle("insert-avant", avant);
-      el.classList.toggle("insert-apres", !avant);
-      const parent = el.closest("[data-depot]");
-      if (parent) parent.classList.remove("survol");
-    });
-
-    el.addEventListener("dragleave", () => {
-      el.classList.remove("insert-avant", "insert-apres");
-    });
-
-    el.addEventListener("drop", (e) => {
-      if (!glisse) return;
-      e.preventDefault();
-      e.stopPropagation();
-      const avant = el.classList.contains("insert-avant");
-      const [isoEl, idEl] = el.dataset.glisser.split("|");
-      const dupliquer = e.altKey || e.ctrlKey || e.metaKey;
-      const depart = glisse;
-
-      /* Le geste est termine : on relache l'etat avant de toucher au DOM. */
-      glisse = null;
-      clearTimeout(chronoGlisser);
-      nettoyerIndicateurs();
-
-      if (idEl !== depart.id) {
-        deplacerActivite(depart.iso, depart.id, isoEl, dupliquer, idEl, avant);
-      }
-    });
-  });
-
-  zone.querySelectorAll("[data-depot]").forEach((cible) => {
-    cible.addEventListener("dragover", (e) => {
-      if (!glisse) return;
-      e.preventDefault();
-      e.dataTransfer.dropEffect = (e.altKey || e.ctrlKey || e.metaKey) ? "copy" : "move";
-      cible.classList.add("survol");
-    });
-    cible.addEventListener("dragleave", (e) => {
-      if (!cible.contains(e.relatedTarget)) cible.classList.remove("survol");
-    });
-    cible.addEventListener("drop", (e) => {
-      if (!glisse) return;
-      e.preventDefault();
-      const dupliquer = e.altKey || e.ctrlKey || e.metaKey;
-      const depart = glisse;
-
-      glisse = null;
-      clearTimeout(chronoGlisser);
-      nettoyerIndicateurs();
-
-      deplacerActivite(depart.iso, depart.id, cible.dataset.depot, dupliquer);
-    });
+    el.addEventListener("pointerdown", (e) => preparerTirage(e, el));
   });
 
   const prec = $("#mois-prec"), suiv = $("#mois-suiv");

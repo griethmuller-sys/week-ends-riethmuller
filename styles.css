@@ -51,8 +51,7 @@ h1, h2, h3 { font-family: "Nunito", "Nunito Sans", system-ui, sans-serif; }
 /* ------------------------------------------------------------ barre haute */
 .barre {
   position: sticky; top: 0; z-index: 40;
-  background: color-mix(in srgb, var(--ground) 88%, transparent);
-  backdrop-filter: blur(10px); border-bottom: 1px solid var(--line);
+  background: var(--ground); border-bottom: 1px solid var(--line);
 }
 .barre-in {
   max-width: 1320px; margin: 0 auto; padding: 12px 20px;
@@ -181,7 +180,16 @@ h1, h2, h3 { font-family: "Nunito", "Nunito Sans", system-ui, sans-serif; }
   -webkit-user-select: none; user-select: none;
   -webkit-touch-callout: none;
 }
-.act.en-glissement { opacity: .35; }
+.act.en-glissement { opacity: .3; }
+
+/* Copie de la vignette qui suit le pointeur pendant le geste. */
+.fantome {
+  position: fixed; left: 0; top: 0; z-index: 90; pointer-events: none;
+  opacity: .95; box-shadow: 0 12px 28px -10px rgba(20, 30, 40, .45);
+  transform: translate3d(-9999px, -9999px, 0);
+}
+body.glisser-en-cours { cursor: grabbing; -webkit-user-select: none; user-select: none; }
+body.glisser-en-cours .act, body.glisser-en-cours .mini { cursor: grabbing; }
 
 /* Trait d'insertion pendant le glisser : montre où l'activité va se poser. */
 .act.insert-avant::after, .act.insert-apres::after,
