@@ -11,12 +11,14 @@ create table if not exists public.activites (
   qui        text not null check (qui in ('gael', 'ingrid', 'thomas', 'famille')),
   texte      text not null check (char_length(texte) between 1 and 500),
   statut     text not null default 'confirme' check (statut in ('confirme', 'a_confirmer')),
+  rang       integer not null default 0,          -- ordre dans la journee
   origine    text,                                   -- 'scout' = programme pré-rempli
   maj_le     timestamptz not null default now(),
   maj_par    uuid references auth.users on delete set null
 );
 
 create index if not exists activites_jour_idx on public.activites (jour);
+create index if not exists activites_jour_rang_idx on public.activites (jour, rang);
 
 create table if not exists public.weekends_reserves (
   samedi     date primary key,
