@@ -19,6 +19,9 @@ const MOIS_NOMS = ["janvier", "février", "mars", "avril", "mai", "juin",
 
 let pressePapier = null;          // activite copiee, en attente de collage
 let glisse = null;                // activite en cours de deplacement
+let chronoGlisser = null;         // garde-fou si dragend ne se declenche jamais
+let renduDiffere = false;         // un rendu a ete demande pendant un glisser
+let rechargementDiffere = false;  // idem pour un rechargement depuis la base
 const HISTORIQUE = { pile: [], position: -1 };
 let publicationEnCours = false;
 let publicationDemandee = false;
@@ -242,6 +245,7 @@ function planifierRechargement() {
 
 async function rechargerDepuisLaBase() {
   if (pousseEnCours) return;
+  if (glisse) { rechargementDiffere = true; return; }
   try {
     await charger();
     amorcerHistorique();
@@ -300,6 +304,9 @@ function brancherRaccourcis() {
 }
 
 function rendreContenu() {
+  /* Reconstruire le DOM pendant un glisser detruit l'element deplace : le
+     navigateur perd le fil, et Safari se fige. On repousse a la fin du geste. */
+  if (glisse) { renduDiffere = true; return; }
   const zone = $("#contenu");
   zone.innerHTML = vue.onglet === "weekends" ? gabaritWeekends() : gabaritMois();
   brancherContenu();
@@ -446,12 +453,14 @@ function vignetteActivite(a, iso, index, total) {
     <span class="texte">${echapper(a.texte)}${suffixe}</span>${verrou}
     <span class="act-actions">
       ${ordonnable ? `
-      <button data-monter="${ref}" title="Monter" aria-label="Monter dans la journée"
-        ${index === 0 ? "disabled" : ""}>↑</button>
-      <button data-descendre="${ref}" title="Descendre" aria-label="Descendre dans la journée"
-        ${index === total - 1 ? "disabled" : ""}>↓</button>` : ""}
-      <button data-copier="${ref}" title="Copier" aria-label="Copier l'activité">⧉</button>
-      <button data-supprimer="${ref}" title="Supprimer" aria-label="Supprimer l'activité">×</button>
+      <button draggable="false" data-monter="${ref}" title="Monter"
+        aria-label="Monter dans la journée" ${index === 0 ? "disabled" : ""}>↑</button>
+      <button draggable="false" data-descendre="${ref}" title="Descendre"
+        aria-label="Descendre dans la journée" ${index === total - 1 ? "disabled" : ""}>↓</button>` : ""}
+      <button draggable="false" data-copier="${ref}" title="Copier"
+        aria-label="Copier l'activité">⧉</button>
+      <button draggable="false" data-supprimer="${ref}" title="Supprimer"
+        aria-label="Supprimer l'activité">×</button>
     </span>
   </div>`;
 }
@@ -635,6 +644,29 @@ function basculerReserve(sam) {
 function reordonner(iso) {
   const liste = ETAT.activites[iso];
   if (liste) liste.forEach((a, i) => { a.rang = i; });
+}
+
+/* Efface les marques visuelles du glisser en cours. */
+function nettoyerIndicateurs() {
+  document.querySelectorAll(".en-glissement, .survol, .insert-avant, .insert-apres")
+    .forEach((x) => x.classList.remove("en-glissement", "survol", "insert-avant", "insert-apres"));
+}
+
+/* Fin du geste : on nettoie, puis on rejoue ce qui avait ete mis en attente. */
+function finDeGlisser() {
+  glisse = null;
+  clearTimeout(chronoGlisser);
+  nettoyerIndicateurs();
+
+  /* On desarme les deux drapeaux avant d'agir : un rechargement redessine de
+     toute facon, mais laisser l'autre arme fausserait le geste suivant. */
+  const rechargement = rechargementDiffere;
+  const rendu = renduDiffere;
+  rechargementDiffere = false;
+  renduDiffere = false;
+
+  if (rechargement) rechargerDepuisLaBase();
+  else if (rendu) rendreContenu();
 }
 
 /* ------------------------------------------------ copier, coller, deplacer */
@@ -823,17 +855,16 @@ function brancherContenu() {
     el.addEventListener("dragstart", (e) => {
       const [iso, id] = el.dataset.glisser.split("|");
       glisse = { iso, id };
+      const a = actesDe(iso).find((x) => x.id === id);
       e.dataTransfer.effectAllowed = "copyMove";
-      e.dataTransfer.setData("text/plain", el.textContent.trim());
+      e.dataTransfer.setData("text/plain", a ? a.texte : "");
       el.classList.add("en-glissement");
+      /* Si le navigateur oublie de signaler la fin du geste, on se debloque seuls. */
+      clearTimeout(chronoGlisser);
+      chronoGlisser = setTimeout(finDeGlisser, 30000);
     });
-    el.addEventListener("dragend", () => {
-      glisse = null;
-      el.classList.remove("en-glissement");
-      zone.querySelectorAll(".survol").forEach((x) => x.classList.remove("survol"));
-      zone.querySelectorAll(".insert-avant, .insert-apres")
-        .forEach((x) => x.classList.remove("insert-avant", "insert-apres"));
-    });
+
+    el.addEventListener("dragend", finDeGlisser);
 
     /* Deposer sur une activite l'insere juste avant ou juste apres elle :
        c'est ce qui permet de ranger une journee a la main. */
@@ -861,12 +892,18 @@ function brancherContenu() {
       e.preventDefault();
       e.stopPropagation();
       const avant = el.classList.contains("insert-avant");
-      el.classList.remove("insert-avant", "insert-apres");
       const [isoEl, idEl] = el.dataset.glisser.split("|");
-      if (idEl === glisse.id) { glisse = null; return; }
       const dupliquer = e.altKey || e.ctrlKey || e.metaKey;
-      deplacerActivite(glisse.iso, glisse.id, isoEl, dupliquer, idEl, avant);
+      const depart = glisse;
+
+      /* Le geste est termine : on relache l'etat avant de toucher au DOM. */
       glisse = null;
+      clearTimeout(chronoGlisser);
+      nettoyerIndicateurs();
+
+      if (idEl !== depart.id) {
+        deplacerActivite(depart.iso, depart.id, isoEl, dupliquer, idEl, avant);
+      }
     });
   });
 
@@ -883,10 +920,14 @@ function brancherContenu() {
     cible.addEventListener("drop", (e) => {
       if (!glisse) return;
       e.preventDefault();
-      cible.classList.remove("survol");
       const dupliquer = e.altKey || e.ctrlKey || e.metaKey;
-      deplacerActivite(glisse.iso, glisse.id, cible.dataset.depot, dupliquer);
+      const depart = glisse;
+
       glisse = null;
+      clearTimeout(chronoGlisser);
+      nettoyerIndicateurs();
+
+      deplacerActivite(depart.iso, depart.id, cible.dataset.depot, dupliquer);
     });
   });
 

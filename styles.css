@@ -177,7 +177,10 @@ h1, h2, h3 { font-family: "Nunito", "Nunito Sans", system-ui, sans-serif; }
   border: 1px solid transparent; transition: box-shadow .12s, opacity .12s; cursor: pointer;
 }
 .act:hover { box-shadow: 0 0 0 2px currentColor inset; }
-.act .texte { user-select: text; }
+.act, .case-mois .mini {
+  -webkit-user-select: none; user-select: none;
+  -webkit-touch-callout: none;
+}
 .act.en-glissement { opacity: .35; }
 
 /* Trait d'insertion pendant le glisser : montre où l'activité va se poser. */
