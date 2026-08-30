@@ -3,7 +3,7 @@
    Les activites et les week-ends reserves vivent dans Supabase, en temps reel. */
 
 let CAL = null;
-let ETAT = { activites: {}, reserves: [] };
+let ETAT = { activites: {}, reserves: [], conges: [] };
 let PERSONNES = [];
 let NOM = {};
 
@@ -27,8 +27,8 @@ let publicationEnCours = false;
 let publicationDemandee = false;
 
 const vue = {
-  onglet: "weekends",
-  mois: null,
+  onglet: "semaine",     // "weekends" | "semaine" | "mois"
+  ancre: null,           // jour de reference, conserve d'une vue a l'autre
   recherche: "",
   moi: null,
 };
@@ -48,18 +48,57 @@ function isoDe(d) {
 function jourSemaine(iso) { return (dateDe(iso).getDay() + 6) % 7; }
 function jjmm(iso) { const [, m, j] = iso.split("-"); return `${j}/${m}`; }
 function jourNombre(d) { return d.getDate() === 1 ? "1er" : String(d.getDate()); }
-function plageLisible(we) {
-  const ouverts = joursOuverts(we);
-  const a = dateDe(ouverts[0].iso);
-  const b = dateDe(ouverts[ouverts.length - 1].iso);
-  if (a.getMonth() === b.getMonth()) {
-    return `${jourNombre(a)} – ${jourNombre(b)} ${MOIS_NOMS[a.getMonth()]}`;
-  }
-  return `${jourNombre(a)} ${MOIS_NOMS[a.getMonth()]} – ${jourNombre(b)} ${MOIS_NOMS[b.getMonth()]}`;
+
+function decaler(iso, n) {
+  const d = dateDe(iso);
+  d.setDate(d.getDate() + n);
+  return isoDe(d);
+}
+function lundiDe(iso) { return decaler(iso, -jourSemaine(iso)); }
+function joursDeLaSemaine(lundi) {
+  return [0, 1, 2, 3, 4, 5, 6].map((i) => decaler(lundi, i));
+}
+function infoJour(iso) { return CAL.jours[iso] || null; }
+function dansLAnnee(iso) { return !!CAL.jours[iso]; }
+function numeroSemaine(iso) {
+  const info = infoJour(iso);
+  if (info) return info.sem;
+  /* Repli : norme ISO 8601, la semaine 1 est celle du premier jeudi. */
+  const d = dateDe(iso);
+  const u = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  u.setUTCDate(u.getUTCDate() + 4 - (u.getUTCDay() || 7));
+  const an = new Date(Date.UTC(u.getUTCFullYear(), 0, 1));
+  return Math.ceil(((u - an) / 86400000 + 1) / 7);
+}
+function moisCleDe(iso) { return iso.slice(0, 7); }
+function moisLisible(iso) {
+  const d = dateDe(iso);
+  return `${MOIS_NOMS[d.getMonth()]} ${d.getFullYear()}`;
 }
 
 function actesDe(iso) { return ETAT.activites[iso] || []; }
 function estReserve(sam) { return ETAT.reserves.includes(sam); }
+function estConge(iso, qui = "gael") {
+  return ETAT.conges.some((c) => c.jour === iso && c.qui === qui);
+}
+
+/* Qui ne travaille pas ce jour-la.
+     fr / sc  -> Ingrid (institutrice) et Thomas (eleve) sont libres
+     ge / pont / conge -> Gael est libre
+     vacances scolaires -> Ingrid et Thomas
+     week-end -> tout le monde, et on ne l'affiche pas : c'est implicite. */
+function statutJour(iso) {
+  const info = infoJour(iso) || { vac: "", fr: "", ge: "", sc: "", pont: "" };
+  const js = jourSemaine(iso);
+  const we = js >= 5;
+  const conge = estConge(iso, "gael");
+  return {
+    we, vac: info.vac, fr: info.fr, ge: info.ge, sc: info.sc, pont: info.pont, conge,
+    gael: we || !!info.ge || !!info.pont || conge,
+    ingrid: we || !!info.fr || !!info.sc || !!info.vac || estConge(iso, "ingrid"),
+    thomas: we || !!info.fr || !!info.sc || !!info.vac || estConge(iso, "thomas"),
+  };
+}
 function tronquer(t, n) { return t.length > n ? t.slice(0, n - 1) + "…" : t; }
 function idUnique() {
   if (crypto.randomUUID) return crypto.randomUUID();
@@ -69,7 +108,6 @@ function idUnique() {
   });
 }
 
-function weekendParSam(sam) { return CAL.weekends.find((w) => w.sam === sam); }
 function joursOuverts(we) { return we.jours.filter((j) => j.ouvert); }
 function actesDuWeekend(we) { return joursOuverts(we).flatMap((j) => actesDe(j.iso)); }
 function estLibre(we) { return actesDuWeekend(we).length === 0; }
@@ -79,6 +117,7 @@ function correspond(texte) {
   if (!vue.recherche) return true;
   return texte.toLowerCase().includes(vue.recherche.toLowerCase());
 }
+
 function weekendVisible(we) {
   if (!vue.recherche) return true;
   const q = vue.recherche.toLowerCase();
@@ -86,15 +125,12 @@ function weekendVisible(we) {
   return actesDuWeekend(we).some((a) => a.texte.toLowerCase().includes(q) || NOM[a.qui].toLowerCase().includes(q));
 }
 
-function prochainWeekendIso() {
-  const auj = isoDe(new Date());
-  const futur = CAL.weekends.find((w) => w.jours[4].iso >= auj);
-  return (futur || CAL.weekends[CAL.weekends.length - 1]).sam;
-}
 
 /* -------------------------------------------------------------- historique */
 function instantane() {
-  return JSON.stringify({ activites: ETAT.activites, reserves: ETAT.reserves });
+  return JSON.stringify({
+    activites: ETAT.activites, reserves: ETAT.reserves, conges: ETAT.conges,
+  });
 }
 
 function amorcerHistorique() {
@@ -118,6 +154,7 @@ function restaurer(index) {
   const etape = JSON.parse(HISTORIQUE.pile[index]);
   ETAT.activites = etape.activites;
   ETAT.reserves = etape.reserves;
+  ETAT.conges = etape.conges || [];
   HISTORIQUE.position = index;
   planifierPublication();
   rendreContenu();
@@ -135,12 +172,16 @@ function majHistorique() {
 
 /* ----------------------------------------------------- Supabase : lecture */
 async function charger() {
-  const [acts, res] = await Promise.all([
+  const [acts, res, cgs] = await Promise.all([
     sb.from("activites").select("id, jour, qui, texte, statut, origine, rang")
       .order("jour").order("rang"),
     sb.from("weekends_reserves").select("samedi"),
+    sb.from("conges").select("jour, qui"),
   ]);
   if (acts.error || res.error) throw (acts.error || res.error);
+  /* La table des conges peut manquer si la migration 02 n'a pas encore ete
+     passee : on continue sans, plutot que de bloquer tout le planning. */
+  if (cgs.error) console.warn("Table conges absente :", cgs.error.message);
 
   const parJour = {};
   for (const a of acts.data) {
@@ -156,6 +197,8 @@ async function charger() {
   }
   ETAT.activites = parJour;
   ETAT.reserves = res.data.map((r) => r.samedi).sort();
+  ETAT.conges = (cgs.error ? [] : cgs.data.map((c) => ({ jour: c.jour, qui: c.qui })))
+    .sort((a, b) => (a.jour + a.qui).localeCompare(b.jour + b.qui));
   etatDistant = instantane();
 }
 
@@ -201,8 +244,16 @@ async function pousser() {
   const reservesPlus = ETAT.reserves.filter((s) => !reservesAvant.includes(s));
   const reservesMoins = reservesAvant.filter((s) => !ETAT.reserves.includes(s));
 
+  const congesAvant = JSON.parse(etatDistant).conges || [];
+  const cle = (c) => c.jour + "|" + c.qui;
+  const clesAvant = new Set(congesAvant.map(cle));
+  const clesApres = new Set(ETAT.conges.map(cle));
+  const congesPlus = ETAT.conges.filter((c) => !clesAvant.has(cle(c)));
+  const congesMoins = congesAvant.filter((c) => !clesApres.has(cle(c)));
+
   if (!aInserer.length && !aModifier.length && !aSupprimer.length
-      && !reservesPlus.length && !reservesMoins.length) { majEtatSauvegarde("ok"); return; }
+      && !reservesPlus.length && !reservesMoins.length
+      && !congesPlus.length && !congesMoins.length) { majEtatSauvegarde("ok"); return; }
 
   pousseEnCours = true;
   majEtatSauvegarde("encours");
@@ -221,6 +272,18 @@ async function pousser() {
     }
     if (reservesPlus.length) {
       const r = await sb.from("weekends_reserves").insert(reservesPlus.map((s) => ({ samedi: s })));
+      if (r.error) throw r.error;
+    }
+    /* Les conges n'ont pas d'identifiant : la cle est (jour, qui). On supprime
+       donc personne par personne, pour ne pas emporter le conge d'un autre
+       pose le meme jour. */
+    for (const qui of new Set(congesMoins.map((c) => c.qui))) {
+      const jours = congesMoins.filter((c) => c.qui === qui).map((c) => c.jour);
+      const r = await sb.from("conges").delete().eq("qui", qui).in("jour", jours);
+      if (r.error) throw r.error;
+    }
+    if (congesPlus.length) {
+      const r = await sb.from("conges").insert(congesPlus.map((c) => ({ jour: c.jour, qui: c.qui })));
       if (r.error) throw r.error;
     }
     etatDistant = instantane();
@@ -261,6 +324,7 @@ function abonner() {
   sb.channel("planning-riethmuller")
     .on("postgres_changes", { event: "*", schema: "public", table: "activites" }, planifierRechargement)
     .on("postgres_changes", { event: "*", schema: "public", table: "weekends_reserves" }, planifierRechargement)
+    .on("postgres_changes", { event: "*", schema: "public", table: "conges" }, planifierRechargement)
     .subscribe();
 }
 
@@ -282,9 +346,23 @@ function rendre() {
   const racine = $("#racine");
   racine.innerHTML = gabaritBarre() + `<main class="page" id="contenu"></main>` + gabaritPied();
   brancherBarre();
+  placerQuiSuisJe();
   rendreContenu();
   majBarre();
   majHistorique();
+}
+
+/* « Je suis » se regle une fois pour toutes. Sur telephone la barre est
+   collante et chaque rangee coute de l'ecran : le selecteur descend donc
+   dans le pied de page, aupres de « Connecte en tant que ». */
+function placerQuiSuisJe() {
+  const bloc = $(".qui-suis-je");
+  const pied = document.querySelector(".pied");
+  if (!bloc || !pied) return;
+  if (window.matchMedia("(max-width: 620px)").matches) {
+    bloc.classList.add("dans-le-pied");
+    pied.appendChild(bloc);
+  }
 }
 
 function brancherRaccourcis() {
@@ -308,8 +386,57 @@ function rendreContenu() {
      navigateur perd le fil, et Safari se fige. On repousse a la fin du geste. */
   if (glisse) { renduDiffere = true; return; }
   const zone = $("#contenu");
-  zone.innerHTML = vue.onglet === "weekends" ? gabaritWeekends() : gabaritMois();
+  const gabarits = {
+    weekends: gabaritWeekends, semaine: gabaritSemaines, mois: gabaritMois,
+  };
+  zone.innerHTML = (gabarits[vue.onglet] || gabaritSemaines)();
   brancherContenu();
+  allerA(vue.ancre);
+}
+
+/* ------------------------------------------------ position dans l'annee
+   Chaque bloc de chaque vue porte data-ancre : le lundi de sa semaine, ou
+   pour un mois son premier lundi. En changeant de vue on retrouve le bloc
+   qui porte la meme ancre, donc le meme moment du calendrier. */
+function hauteurBarre() {
+  const b = document.querySelector(".barre");
+  return b ? b.getBoundingClientRect().height : 0;
+}
+
+function allerA(iso, doux = false) {
+  if (!iso) return;
+  const zone = $("#contenu");
+  if (!zone) return;
+  const cible = vue.onglet === "mois" ? moisCleDe(iso) : lundiDe(iso);
+  const sel = vue.onglet === "mois" ? `[data-moiscle="${cible}"]` : `[data-ancre="${cible}"]`;
+  let el = zone.querySelector(sel);
+  if (!el) {
+    const tous = [...zone.querySelectorAll("[data-ancre]")];
+    el = tous.find((x) => x.dataset.ancre >= lundiDe(iso)) || tous[tous.length - 1];
+  }
+  if (!el) return;
+  const avant = el.previousElementSibling;
+  const marge = avant && avant.classList.contains("bandeau-mois") ? avant.offsetHeight + 8 : 0;
+  const y = window.scrollY + el.getBoundingClientRect().top - hauteurBarre() - marge - 10;
+  window.scrollTo({ top: Math.max(0, y), behavior: doux ? "smooth" : "auto" });
+}
+
+/* En defilant on retient le premier bloc encore visible : c'est lui qui
+   sera repris a la bascule. Le dernier bloc passe au-dessus du bord ferait
+   retarder l'ancre d'une periode a chaque changement de vue. */
+let minuteurAncre = null;
+function surveillerDefilement() {
+  window.addEventListener("scroll", () => {
+    clearTimeout(minuteurAncre);
+    minuteurAncre = setTimeout(() => {
+      const zone = $("#contenu");
+      if (!zone || glisse) return;
+      const bord = hauteurBarre() + 24;
+      for (const el of zone.querySelectorAll("[data-ancre]")) {
+        if (el.getBoundingClientRect().bottom > bord) { vue.ancre = el.dataset.ancre; return; }
+      }
+    }, 120);
+  }, { passive: true });
 }
 
 function gabaritBarre() {
@@ -320,8 +447,13 @@ function gabaritBarre() {
       <span>Année scolaire 2026-2027 · ${CAL.meta.nbWeekends} week-ends · zone A &amp; Genève</span>
     </div>
     <div class="onglets" role="tablist">
-      <button role="tab" id="onglet-weekends" aria-selected="${vue.onglet === "weekends"}">Week-ends</button>
+      <button role="tab" id="onglet-weekends" aria-selected="${vue.onglet === "weekends"}">Week-end</button>
+      <button role="tab" id="onglet-semaine" aria-selected="${vue.onglet === "semaine"}">Semaine</button>
       <button role="tab" id="onglet-mois" aria-selected="${vue.onglet === "mois"}">Mois</button>
+    </div>
+    <div class="groupe-nav">
+      <button class="bouton-icone" id="btn-prec" title="Période précédente" aria-label="Période précédente">←</button>
+      <button class="bouton-icone" id="btn-suiv" title="Période suivante" aria-label="Période suivante">→</button>
     </div>
     <div class="champ-recherche">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true">
@@ -360,6 +492,174 @@ function gabaritPied() {
   </footer>`;
 }
 
+/* ------------------------------------------------------- morceaux partages */
+
+/* Les etiquettes de la journee : ferie France, ferie Geneve, pont, conge. */
+function marquesDuJour(st) {
+  const m = [];
+  if (st.fr && st.ge) m.push(`<span class="marq ferie">FR+GE ${echapper(st.fr)}</span>`);
+  else if (st.ge) m.push(`<span class="marq ferie">GE ${echapper(st.ge)}</span>`);
+  else if (st.fr) m.push(`<span class="marq ferie">FR ${echapper(st.fr)}</span>`);
+  if (st.sc) m.push(`<span class="marq ferie">École ${echapper(st.sc)}</span>`);
+  if (st.pont) m.push(`<span class="marq conge">Pont ${echapper(st.pont)}</span>`);
+  if (st.conge) m.push(`<span class="marq conge">Congé Gaël</span>`);
+  return m.join("");
+}
+
+/* Trois pastilles : qui ne travaille pas. Rien le week-end, ou tout le monde
+   est libre de toute facon, ni les jours ordinaires ou tout le monde travaille. */
+function pastillesLibres(st) {
+  if (st.we) return "";
+  if (!(st.gael || st.ingrid || st.thomas)) return "";
+  const noms = { gael: "Gaël", ingrid: "Ingrid", thomas: "Thomas" };
+  const libres = ["gael", "ingrid", "thomas"].filter((p) => st[p]).map((p) => noms[p]);
+  const p = (id, lettre) =>
+    `<i class="${id}${st[id] ? " on" : ""}" aria-hidden="true">${lettre}</i>`;
+  return `<span class="off" title="Libre : ${libres.join(", ")}">
+    ${p("gael", "G")}${p("ingrid", "I")}${p("thomas", "T")}
+    <span class="lecture-seule">Libre : ${libres.join(", ")}</span>
+  </span>`;
+}
+
+/* Bouton discret pour poser ou retirer un conge. Inutile un jour ou Gael
+   ne travaille pas de toute facon. */
+function boutonConge(iso, st) {
+  if (st.we || st.ge || st.pont) return "";
+  const pose = st.conge;
+  return `<button class="marq conge bouton-conge${pose ? " pose" : ""}"
+    data-conge="${iso}" aria-pressed="${pose}"
+    title="${pose ? "Retirer le congé" : "Poser un congé"}"
+    aria-label="${pose ? "Retirer le congé de Gaël" : "Poser un congé pour Gaël"}">C</button>`;
+}
+
+/* Un jour complet, en colonne (vue semaine) ou en bande large (vue week-end). */
+function celluleJourComplet(iso, opts = {}) {
+  const st = statutJour(iso);
+  const d = dateDe(iso);
+  const sam = st.we ? decaler(iso, jourSemaine(iso) === 5 ? 0 : -1) : null;
+  const reserve = sam ? estReserve(sam) : false;
+
+  const liste = actesDe(iso);
+  const classes = ["jour",
+    st.we ? "we" : "", st.vac ? "vacj" : "", reserve ? "res" : "",
+    iso === isoDe(new Date()) ? "aujourdhui" : "",
+    liste.length ? "plein" : "", opts.bande ? "bande" : ""].filter(Boolean).join(" ");
+
+  const actes = liste.map((a, i) => vignetteActivite(a, iso, i, liste.length)).join("");
+  const marques = marquesDuJour(st);
+  const coller = pressePapier
+    ? `<button class="coller" data-coller="${iso}">Coller « ${echapper(tronquer(pressePapier.texte, 22))} »</button>`
+    : "";
+
+  return `<div class="${classes}" data-jour="${iso}" data-depot="${iso}">
+    <div class="jour-tete">
+      <b>${JOURS_COURTS[jourSemaine(iso)]}</b><span class="chiffre">${d.getDate()}</span>
+      ${pastillesLibres(st)}${boutonConge(iso, st)}
+    </div>
+    ${marques ? `<div class="marques">${marques}</div>` : ""}
+    <div class="acts">${actes}</div>
+    <div class="jour-pied">
+      <button class="ajouter" data-ajouter="${iso}">+ Ajouter</button>${coller}
+    </div>
+  </div>`;
+}
+
+/* Vue week-end : un jour de semaine ordinaire se reduit a un filet. Ce qui y
+   a ete pose depuis la vue semaine reste visible en miniature, sinon il
+   disparaitrait completement de cette vue. */
+function ligneFilet(iso) {
+  const st = statutJour(iso);
+  const d = dateDe(iso);
+  const petits = actesDe(iso).map((a) =>
+    `<span class="mini ${a.qui}" title="${echapper(NOM[a.qui] + " — " + a.texte)}"
+       >${echapper(tronquer(a.texte, 34))}</span>`).join("");
+  return `<div class="jour-filet" data-jour="${iso}">
+    <b>${JOURS_COURTS[jourSemaine(iso)]}</b><span class="chiffre">${d.getDate()}</span>
+    ${pastillesLibres(st)}
+    ${petits ? `<span class="petits">${petits}</span>` : ""}
+  </div>`;
+}
+
+function bandeauMoisIso(iso) {
+  const cle = moisCleDe(iso);
+  const reserves = CAL.weekends.filter((w) => moisCleDe(w.sam) === cle && estReserve(w.sam));
+  const info = reserves.length
+    ? `<span class="reserve-mois">★ Réservé : <b>${reserves.map((w) => jjmm(w.sam)).join(", ")}</b></span>`
+    : `<span class="reserve-mois manquant">Aucun week-end réservé ce mois-ci</span>`;
+  const titre = moisLisible(iso);
+  return `<div class="bandeau-mois"><h2>${titre.charAt(0).toUpperCase() + titre.slice(1)}</h2>${info}</div>`;
+}
+
+/* Titre d'un bloc de semaine : « S37 · 7 – 13 septembre ». */
+function enteteSemaine(lundi, jours) {
+  const a = dateDe(jours[0]), b = dateDe(jours[jours.length - 1]);
+  const plage = a.getMonth() === b.getMonth()
+    ? `${jourNombre(a)} – ${jourNombre(b)} ${MOIS_NOMS[b.getMonth()]}`
+    : `${jourNombre(a)} ${MOIS_NOMS[a.getMonth()]} – ${jourNombre(b)} ${MOIS_NOMS[b.getMonth()]}`;
+  return `<span class="sem-num" title="Semaine ${numeroSemaine(lundi)}">S${numeroSemaine(lundi)}</span>
+    <span class="we-dates">${plage}</span>`;
+}
+
+/* ----------------------------------------------------------- vue « semaine » */
+function semainesVisibles() {
+  return CAL.semaines.filter((lundi) => {
+    if (!vue.recherche) return true;
+    const q = vue.recherche.toLowerCase();
+    return joursDeLaSemaine(lundi).some((iso) => {
+      const info = infoJour(iso);
+      if (info && ((info.vac || "").toLowerCase().includes(q)
+                || (info.ferie || "").toLowerCase().includes(q))) return true;
+      if (moisLisible(iso).toLowerCase().includes(q)) return true;
+      return actesDe(iso).some((a) =>
+        a.texte.toLowerCase().includes(q) || NOM[a.qui].toLowerCase().includes(q));
+    });
+  });
+}
+
+function gabaritSemaines() {
+  const visibles = semainesVisibles();
+  if (!visibles.length) {
+    return `<p class="vide">Aucune semaine ne correspond à « ${echapper(vue.recherche)} ».</p>`;
+  }
+  let html = "", moisCourant = null;
+  for (const lundi of visibles) {
+    if (moisCleDe(lundi) !== moisCourant) {
+      moisCourant = moisCleDe(lundi);
+      html += bandeauMoisIso(lundi);
+    }
+    html += carteSemaine(lundi);
+  }
+  return html;
+}
+
+function carteSemaine(lundi) {
+  const jours = joursDeLaSemaine(lundi).filter(dansLAnnee);
+  const vac = jours.map((j) => (infoJour(j) || {}).vac).find(Boolean) || "";
+  const sam = jours.find((j) => jourSemaine(j) === 5);
+  const reserve = sam ? estReserve(sam) : false;
+  const scout = jours.some((j) => actesDe(j).some((a) => a.origine === "scout"));
+
+  const puces = [];
+  if (reserve) puces.push(`<span class="puce reserve">★ Réservé</span>`);
+  if (vac) puces.push(`<span class="puce vac">${echapper(vac)}</span>`);
+  if (scout) puces.push(`<span class="puce scout">Thomas au scout</span>`);
+
+  const classes = ["we", "semaine", vac ? "vacances" : "", reserve ? "reserve-we" : ""]
+    .filter(Boolean).join(" ");
+
+  return `<article class="${classes}" data-ancre="${lundi}" id="sem-${lundi}">
+    <div class="we-tete">
+      ${enteteSemaine(lundi, jours)}
+      ${puces.join("")}
+      ${sam ? `<span class="we-actions">
+        <button class="bouton-reserver" data-reserver="${sam}"
+          aria-pressed="${reserve}">${reserve ? "Libérer" : "★ Réserver"}</button>
+      </span>` : ""}
+    </div>
+    <div class="grille7">${jours.map((j) => celluleJourComplet(j)).join("")}</div>
+  </article>`;
+}
+
 /* --------------------------------------------------------- vue « week-ends » */
 function gabaritWeekends() {
   const visibles = CAL.weekends.filter(weekendVisible);
@@ -371,27 +671,18 @@ function gabaritWeekends() {
   for (const we of visibles) {
     if (we.moisCle !== moisCourant) {
       moisCourant = we.moisCle;
-      html += bandeauMois(we);
+      html += bandeauMoisIso(we.sam);
     }
     html += carteWeekend(we);
   }
   return html;
 }
 
-function bandeauMois(we) {
-  const duMois = CAL.weekends.filter((w) => w.moisCle === we.moisCle);
-  const reserves = duMois.filter((w) => estReserve(w.sam));
-  const info = reserves.length
-    ? `<span class="reserve-mois">★ Réservé : <b>${reserves.map((w) => jjmm(w.sam)).join(", ")}</b></span>`
-    : `<span class="reserve-mois manquant">Aucun week-end réservé ce mois-ci</span>`;
-  return `<div class="bandeau-mois"><h2>${echapper(we.mois)}</h2>${info}</div>`;
-}
-
 function carteWeekend(we) {
   const reserve = estReserve(we.sam);
   const libre = estLibre(we);
   const ouverts = joursOuverts(we);
-  const plage = plageLisible(we);
+  const lundi = lundiDe(we.sam);
   const classes = ["we", we.vac ? "vacances" : "", libre ? "libre" : "", reserve ? "reserve" : ""]
     .filter(Boolean).join(" ");
 
@@ -402,12 +693,15 @@ function carteWeekend(we) {
   if (scoutDansWeekend(we)) puces.push(`<span class="puce scout">Thomas au scout</span>`);
   if (libre && !reserve) puces.push(`<span class="puce libre">Libre</span>`);
 
-  const cellules = we.jours.map((j) => celluleJour(j)).join("");
+  /* Les cinq jours empiles : bande large pour le week-end et les feries
+     attenants, filet en pointilles pour les jours de semaine ordinaires. */
+  const rangs = we.jours.map((j) =>
+    j.ouvert ? celluleJourComplet(j.iso, { bande: true }) : ligneFilet(j.iso)).join("");
   const note = we.note ? `<p class="we-note">${echapper(we.note)}</p>` : "";
 
-  return `<article class="${classes}" data-sam="${we.sam}" id="we-${we.sam}">
+  return `<article class="${classes}" data-sam="${we.sam}" data-ancre="${lundi}" id="we-${we.sam}">
     <div class="we-tete">
-      <span class="we-dates">${plage}</span>
+      ${enteteSemaine(lundi, ouverts.map((j) => j.iso))}
       ${puces.join("")}
       <span class="we-actions">
         <button class="bouton-reserver" data-reserver="${we.sam}"
@@ -415,28 +709,8 @@ function carteWeekend(we) {
       </span>
     </div>
     ${note}
-    <div class="jours">${cellules}</div>
+    <div class="pile-we">${rangs}</div>
   </article>`;
-}
-
-function celluleJour(j) {
-  if (!j.ouvert) {
-    return `<div class="jour ferme"><div class="jour-tete">
-      <span class="jour-date">${echapper(j.label)}</span></div></div>`;
-  }
-  const ferie = j.ferie ? `<span class="jour-ferie">${echapper(j.ferie)}</span>` : "";
-  const liste = actesDe(j.iso);
-  const actes = liste.map((a, i) => vignetteActivite(a, j.iso, i, liste.length)).join("");
-  const coller = pressePapier
-    ? `<button class="coller" data-coller="${j.iso}">Coller « ${echapper(tronquer(pressePapier.texte, 22))} »</button>`
-    : "";
-  return `<div class="jour" data-jour="${j.iso}" data-depot="${j.iso}">
-    <div class="jour-tete"><span class="jour-date">${echapper(j.label)}</span>${ferie}</div>
-    <div class="acts">${actes}</div>
-    <div class="jour-pied">
-      <button class="ajouter" data-ajouter="${j.iso}">+ Ajouter</button>${coller}
-    </div>
-  </div>`;
 }
 
 function vignetteActivite(a, iso, index, total) {
@@ -448,6 +722,7 @@ function vignetteActivite(a, iso, index, total) {
   const ref = `${iso}|${a.id}`;
   return `<div class="${classes}" data-modifier="${ref}" data-glisser="${ref}"
        tabindex="0" role="button"
+       title="${echapper(NOM[a.qui] + " — " + a.texte + suffixe)}"
        aria-label="${echapper(NOM[a.qui] + " : " + a.texte)}">
     <span class="qui">${NOM[a.qui] ? NOM[a.qui][0] : "?"}</span>
     <span class="texte">${echapper(a.texte)}${suffixe}</span>${verrou}
@@ -465,74 +740,92 @@ function vignetteActivite(a, iso, index, total) {
   </div>`;
 }
 
-/* -------------------------------------------------------------- vue « mois » */
-function gabaritMois() {
-  const [an, mo] = vue.mois.split("-").map(Number);
-  const premier = new Date(an, mo - 1, 1);
-  const decalage = (premier.getDay() + 6) % 7;
-  const debut = new Date(an, mo - 1, 1 - decalage);
-  const titre = `${MOIS_NOMS[mo - 1]} ${an}`;
-
-  const moisDispo = [...new Set(CAL.weekends.map((w) => w.moisCle))];
-  const idx = moisDispo.indexOf(vue.mois);
-  const reservesDuMois = CAL.weekends.filter((w) => w.moisCle === vue.mois && estReserve(w.sam));
-
-  let cases = JOURS_LONGS.map((j) => `<div class="entete">${j.slice(0, 3)}</div>`).join("");
-  for (let i = 0; i < 42; i++) {
-    const d = new Date(debut.getFullYear(), debut.getMonth(), debut.getDate() + i);
-    if (i >= 35 && d.getMonth() !== mo - 1) break;
-    cases += caseMois(d, mo);
+/* -------------------------------------------------------------- vue « mois »
+   Informative seulement : ni ajout, ni glisser-deposer. Cliquer un jour
+   ouvre sa semaine, ce qui evite de chercher ou l'on etait. */
+function moisDeLAnnee() {
+  const vus = [];
+  for (const lundi of CAL.semaines) {
+    for (const iso of joursDeLaSemaine(lundi)) {
+      const cle = moisCleDe(iso);
+      if (dansLAnnee(iso) && !vus.includes(cle)) vus.push(cle);
+    }
   }
-
-  const info = reservesDuMois.length
-    ? `★ Réservé : <b>${reservesDuMois.map((w) => jjmm(w.sam)).join(", ")}</b>`
-    : `<span style="font-style:italic">Aucun week-end réservé ce mois-ci</span>`;
-
-  return `<div class="mois-nav">
-      <button id="mois-prec" ${idx <= 0 ? "disabled" : ""} aria-label="Mois précédent">←</button>
-      <button id="mois-suiv" ${idx >= moisDispo.length - 1 ? "disabled" : ""} aria-label="Mois suivant">→</button>
-      <h2>${titre.charAt(0).toUpperCase() + titre.slice(1)}</h2>
-      <span class="reserve-mois" style="margin-left:auto;font-size:12.5px;color:var(--muted)">${info}</span>
-    </div>
-    <div class="grille-mois">${cases}</div>`;
+  return vus.sort();
 }
 
-function caseMois(d, moisRef) {
-  const iso = isoDe(d);
+function gabaritMois() {
+  return moisDeLAnnee().map(grilleDuMois).join("");
+}
+
+function grilleDuMois(moisCle) {
+  const [an, mo] = moisCle.split("-").map(Number);
+  const premier = new Date(an, mo - 1, 1);
+  const debut = isoDe(new Date(an, mo - 1, 1 - ((premier.getDay() + 6) % 7)));
+  const fin = new Date(an, mo, 0);
+  const dernier = lundiDe(isoDe(fin));
+
+  let lignes = "";
+  for (let l = debut; l <= dernier; l = decaler(l, 7)) {
+    lignes += `<div class="gouttiere" title="Semaine ${numeroSemaine(l)}">S${numeroSemaine(l)}</div>`;
+    lignes += joursDeLaSemaine(l).map((iso) => caseMois(iso, mo)).join("");
+  }
+
+  /* Premier lundi du mois : l'ancre, pour que le retour en vue semaine
+     ouvre une semaine qui appartient bien a ce mois-ci. */
+  const ancre = premier.getDay() === 1 ? isoDe(premier) : decaler(lundiDe(isoDe(premier)), 7);
+
+  return `<section class="bloc-mois" data-moiscle="${moisCle}" data-ancre="${ancre}">
+    ${bandeauMoisIso(isoDe(premier))}
+    <div class="grille-mois">
+      <div class="entete"></div>
+      ${JOURS_LONGS.map((j) => `<div class="entete">${j.slice(0, 3)}</div>`).join("")}
+      ${lignes}
+    </div>
+  </section>`;
+}
+
+function caseMois(iso, moisRef) {
+  const d = dateDe(iso);
   const info = CAL.jours[iso];
   const hors = d.getMonth() !== moisRef - 1 || !info;
   const auj = iso === isoDe(new Date());
+  const st = info ? statutJour(iso) : null;
   const we = info && info.we ? CAL.weekends[info.we - 1] : null;
   const reserve = we ? estReserve(we.sam) : false;
 
   const classes = ["case-mois",
-    hors ? "hors" : (info && info.ouvert ? "" : "semaine"),
+    hors ? "hors" : (st && st.we ? "" : "semaine"),
     !hors && info && info.vac ? "vacances" : "",
-    reserve ? "reserve" : ""].filter(Boolean).join(" ");
+    reserve ? "reserve" : "",
+    auj ? "auj" : ""].filter(Boolean).join(" ");
 
   if (hors) {
     return `<div class="${classes}"><span class="num">${d.getDate()}</span></div>`;
   }
 
-  const ferie = info.ferie ? `<span class="marque-ferie">${echapper(info.ferie.split(" ").slice(0, 3).join(" "))}</span>` : "";
+  /* Le prefixe FR / GE passe en premier : c'est lui qui doit survivre a la
+     troncature, puisque c'est lui qui dit qui est concerne. */
+  const fer = (st.fr && st.ge) ? `FR+GE ${st.fr}`
+            : st.ge ? `GE ${st.ge}`
+            : st.fr ? `FR ${st.fr}`
+            : st.sc ? `École ${st.sc}`
+            : st.pont ? `Pont ${st.pont}` : "";
+  const ferie = fer ? `<span class="marque-ferie">${echapper(fer)}</span>` : "";
   const etoile = reserve ? `<span class="etoile" title="Week-end réservé">★</span>` : "";
+  const pointConge = st.conge
+    ? `<span class="pt-conge" title="Congé de Gaël"></span>` : "";
   const numero = auj
-    ? `<span class="num"><span class="aujourdhui">${d.getDate()}</span>${etoile}</span>`
-    : `<span class="num">${d.getDate()}${etoile}</span>`;
+    ? `<span class="num"><span class="aujourdhui">${d.getDate()}</span>${etoile}${pointConge}</span>`
+    : `<span class="num">${d.getDate()}${etoile}${pointConge}</span>`;
 
   const actes = actesDe(iso)
     .filter((a) => correspond(a.texte) || correspond(NOM[a.qui]))
-    .map((a) => `<div class="mini ${a.qui}${a.statut === "a_confirmer" ? " a_confirmer" : ""}"
-        data-modifier="${iso}|${a.id}" data-glisser="${iso}|${a.id}" tabindex="0" role="button"
-        title="${echapper(NOM[a.qui] + " — " + a.texte)}">${echapper(a.texte)}</div>`).join("");
+    .map((a) => `<span class="mini ${a.qui}${a.statut === "a_confirmer" ? " a_confirmer" : ""}"
+        title="${echapper(NOM[a.qui] + " — " + a.texte)}">${echapper(a.texte)}</span>`).join("");
 
-  const ajout = info.ouvert
-    ? `<button class="ajouter" style="font-size:10.5px;padding:1px 7px" data-ajouter="${iso}">+</button>` : "";
-  const coller = info.ouvert && pressePapier
-    ? `<button class="coller mini-coller" data-coller="${iso}" title="Coller ici">Coller</button>` : "";
-
-  const depot = info.ouvert ? ` data-depot="${iso}"` : "";
-  return `<div class="${classes}"${depot}>${numero}${ferie}${actes}${ajout}${coller}</div>`;
+  return `<div class="${classes}" data-va="${iso}" role="button" tabindex="0"
+    title="Voir la semaine du ${jjmm(iso)}">${numero}${ferie}${actes}</div>`;
 }
 
 /* ------------------------------------------------------------------ modale */
@@ -631,6 +924,17 @@ function supprimerActivite(iso, id) {
     if (!ETAT.activites[iso].length) delete ETAT.activites[iso];
     else reordonner(iso);
   });
+}
+
+function basculerConge(iso, qui = "gael") {
+  const pose = estConge(iso, qui);
+  appliquer(() => {
+    ETAT.conges = pose
+      ? ETAT.conges.filter((c) => !(c.jour === iso && c.qui === qui))
+      : [...ETAT.conges, { jour: iso, qui }]
+          .sort((a, b) => (a.jour + a.qui).localeCompare(b.jour + b.qui));
+  });
+  annoncer(pose ? `Congé retiré le ${jjmm(iso)}.` : `Congé posé le ${jjmm(iso)}.`);
 }
 
 function basculerReserve(sam) {
@@ -989,12 +1293,17 @@ function echapTirage(e) {
 
 /* ------------------------------------------------------------- branchements */
 function brancherBarre() {
-  $("#onglet-weekends").addEventListener("click", () => { vue.onglet = "weekends"; rendre(); });
-  $("#onglet-mois").addEventListener("click", () => {
-    vue.onglet = "mois";
-    if (!vue.mois) vue.mois = weekendParSam(prochainWeekendIso()).moisCle;
+  const changerVue = (nom) => {
+    vue.onglet = nom;
+    try { localStorage.setItem("planning-vue", nom); } catch (e) { /* stockage indisponible */ }
     rendre();
-  });
+  };
+  $("#onglet-weekends").addEventListener("click", () => changerVue("weekends"));
+  $("#onglet-semaine").addEventListener("click", () => changerVue("semaine"));
+  $("#onglet-mois").addEventListener("click", () => changerVue("mois"));
+
+  $("#btn-prec").addEventListener("click", () => sauterPeriode(-1));
+  $("#btn-suiv").addEventListener("click", () => sauterPeriode(1));
 
   const rech = $("#recherche");
   rech.addEventListener("input", () => {
@@ -1074,35 +1383,60 @@ function brancherContenu() {
   zone.querySelectorAll("[data-reserver]").forEach((b) =>
     b.addEventListener("click", () => basculerReserve(b.dataset.reserver)));
 
+  zone.querySelectorAll("[data-conge]").forEach((b) =>
+    b.addEventListener("click", (e) => { e.stopPropagation(); basculerConge(b.dataset.conge); }));
+
+  /* Vue mois : lecture seule, mais cliquer un jour ouvre sa semaine. */
+  zone.querySelectorAll("[data-va]").forEach((c) => {
+    const ouvrir = () => {
+      vue.ancre = c.dataset.va;
+      vue.onglet = "semaine";
+      rendre();
+      annoncer(`Semaine du ${jjmm(c.dataset.va)}.`);
+    };
+    c.addEventListener("click", ouvrir);
+    c.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); ouvrir(); }
+    });
+  });
+
   /* Le glisser-deposer est gere au pointeur (voir plus bas), il suffit ici
      d'armer chaque vignette. */
   zone.querySelectorAll("[data-glisser]").forEach((el) => {
     el.addEventListener("pointerdown", (e) => preparerTirage(e, el));
   });
 
-  const prec = $("#mois-prec"), suiv = $("#mois-suiv");
-  if (prec) prec.addEventListener("click", () => decalerMois(-1));
-  if (suiv) suiv.addEventListener("click", () => decalerMois(1));
+  /* La navigation par mois est passee dans la barre (boutons ← →), commune
+     aux trois vues : plus rien a brancher ici. */
 }
 
-function decalerMois(pas) {
-  const moisDispo = [...new Set(CAL.weekends.map((w) => w.moisCle))];
-  const i = moisDispo.indexOf(vue.mois) + pas;
-  if (i < 0 || i >= moisDispo.length) return;
-  vue.mois = moisDispo[i];
-  rendreContenu();
+/* Une periode = une semaine, ou un mois en vue mois. */
+function sauterPeriode(pas) {
+  const base = vue.ancre || premierJourUtile();
+  if (vue.onglet === "mois") {
+    const d = dateDe(base);
+    const cible = new Date(d.getFullYear(), d.getMonth() + pas, 1);
+    const lundi = cible.getDay() === 1 ? isoDe(cible) : decaler(lundiDe(isoDe(cible)), 7);
+    vue.ancre = lundi;
+  } else {
+    vue.ancre = decaler(lundiDe(base), 7 * pas);
+  }
+  allerA(vue.ancre, true);
+}
+
+function premierJourUtile() {
+  const auj = isoDe(new Date());
+  return CAL.semaines.find((l) => decaler(l, 6) >= auj) || CAL.semaines[0];
 }
 
 function allerAujourdhui() {
-  const sam = prochainWeekendIso();
-  if (vue.onglet === "mois") {
-    vue.mois = weekendParSam(sam).moisCle;
+  if (vue.recherche) {
+    vue.recherche = "";
+    const r = $("#recherche"); if (r) r.value = "";
     rendreContenu();
-    return;
   }
-  if (vue.recherche) { vue.recherche = ""; $("#recherche").value = ""; rendreContenu(); }
-  const cible = document.getElementById("we-" + sam);
-  if (cible) cible.scrollIntoView({ behavior: "smooth", block: "center" });
+  vue.ancre = premierJourUtile();
+  allerA(vue.ancre, true);
 }
 
 function majBarre() {
@@ -1145,7 +1479,10 @@ function rendreConnexion(message) {
 /* ------------------------------------------------------------------ depart */
 async function apresConnexion() {
   try { vue.moi = localStorage.getItem("planning-moi") || null; } catch (e) { vue.moi = null; }
-  vue.mois = weekendParSam(prochainWeekendIso()).moisCle;
+  try {
+    const memorisee = localStorage.getItem("planning-vue");
+    if (["weekends", "semaine", "mois"].includes(memorisee)) vue.onglet = memorisee;
+  } catch (e) { /* stockage indisponible */ }
 
   $("#racine").innerHTML = `<p class="vide">Chargement du planning…</p>`;
   try {
@@ -1158,8 +1495,10 @@ async function apresConnexion() {
   }
 
   amorcerHistorique();
+  vue.ancre = premierJourUtile();
   rendre();
   brancherRaccourcis();
+  surveillerDefilement();
   abonner();
   setTimeout(allerAujourdhui, 60);
 

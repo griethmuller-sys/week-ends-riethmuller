@@ -69,7 +69,7 @@ h1, h2, h3 { font-family: "Fredoka", "Nunito Sans", system-ui, sans-serif; }
 .champ-recherche input:focus { outline: none; border-color: var(--ink-2); }
 .champ-recherche svg { position: absolute; left: 12px; width: 14px; height: 14px; color: var(--muted); }
 
-.groupe-histo { display: flex; gap: 3px; }
+.groupe-histo, .groupe-nav { display: flex; gap: 3px; }
 .bouton-icone {
   width: 32px; height: 32px; border-radius: 999px; border: 1px solid var(--line-strong);
   color: var(--ink-2); font-size: 16px; line-height: 1; display: grid; place-items: center;
@@ -146,23 +146,100 @@ h1, h2, h3 { font-family: "Fredoka", "Nunito Sans", system-ui, sans-serif; }
 
 .we-note { font-size: 12.5px; color: var(--muted); padding: 0 16px 4px; }
 
-.jours { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; padding: 0 12px 12px; }
 .jour {
   background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-s);
   padding: 9px 11px 11px; min-height: 96px; display: flex; flex-direction: column; gap: 7px;
+  min-width: 0;
 }
 .we.vacances .jour { background: color-mix(in srgb, var(--vac) 45%, var(--surface)); border-color: var(--vac-line); }
 .we.reserve .jour { background: var(--surface); border-color: var(--reserve-line); }
-.jour.ferme {
-  background: transparent; border-style: dashed; border-color: var(--line);
-  min-height: 0; align-self: start; padding: 7px 11px; gap: 0;
+.jour-tete { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.jour-tete b { font-size: 12px; font-weight: 800; color: var(--ink-2); }
+.jour-tete .chiffre { font-size: 14.5px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.jour.we .jour-tete b { color: var(--ink); }
+/* Plus specifique que la regle week-end ci-dessus : sinon le chiffre reste
+   sombre sur la pastille sombre et devient illisible. */
+.jour.aujourdhui .chiffre {
+  background: var(--ink); color: var(--ground); border-radius: 999px;
+  min-width: 23px; height: 23px; display: inline-grid; place-items: center;
+  font-size: 12.5px; padding: 0 6px;
 }
-.jour-tete { display: flex; align-items: baseline; gap: 7px; flex-wrap: wrap; }
-.jour-date { font-size: 12.5px; font-weight: 700; color: var(--ink-2); }
-.jour.ferme .jour-date { color: var(--muted); font-weight: 400; }
-.jour-ferie {
-  font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 999px;
-  color: var(--ferie-ink); border: 1px solid var(--ferie-line);
+
+/* ------------------------------------------------- vue semaine : 7 colonnes */
+.grille7 { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; padding: 0 12px 12px; }
+.we.semaine .jour.we { background: var(--faded); border-color: var(--line-strong); }
+.we.semaine .jour.res {
+  background: var(--reserve); border: 1px solid var(--reserve-line);
+  border-left: 6px solid var(--reserve-vif);
+}
+
+/* Les etiquettes du jour : ferie France ou Geneve, pont, conge. */
+.marques { display: flex; flex-wrap: wrap; gap: 4px; }
+.marq {
+  font-size: 10px; font-weight: 800; padding: 2px 7px; border-radius: 7px; line-height: 1.35;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.marq.ferie { background: var(--ferie-bg); color: var(--ferie-ink); }
+.marq.conge { background: var(--gael-bg); color: var(--gael); border: 1px dashed var(--gael); }
+.bouton-conge { cursor: pointer; opacity: 0; transition: opacity .12s; }
+.jour:hover .bouton-conge, .bouton-conge:focus-visible, .bouton-conge.pose { opacity: 1; }
+
+/* Qui ne travaille pas ce jour-la. */
+.off { display: inline-flex; gap: 3px; align-items: center; }
+.off i {
+  width: 15px; height: 15px; border-radius: 5px; display: grid; place-items: center;
+  font-size: 9px; font-weight: 800; font-style: normal;
+  background: var(--faded); color: #C3BCAC;
+}
+.off i.gael.on { background: var(--gael); color: #fff; }
+.off i.ingrid.on { background: var(--ingrid); color: #fff; }
+.off i.thomas.on { background: var(--thomas); color: #fff; }
+.lecture-seule {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+}
+
+/* ------------------------------------------ vue week-end : les jours empiles */
+.pile-we { display: flex; flex-direction: column; gap: 7px; padding: 0 12px 12px; }
+.jour.bande {
+  flex-direction: row; align-items: flex-start; flex-wrap: wrap; gap: 11px;
+  min-height: 0; padding: 10px 13px;
+}
+.jour.bande .jour-tete { width: 116px; flex: none; }
+.jour.bande .marques { flex: none; max-width: 250px; }
+.jour.bande .acts { flex-direction: row; flex-wrap: wrap; flex: 1; min-width: 160px; }
+.jour.bande .act { width: auto; max-width: 340px; }
+.jour.bande .jour-pied { margin-left: auto; margin-top: 0; align-self: center; }
+.we.reserve .jour.bande {
+  background: var(--reserve); border: 1px solid var(--reserve-line);
+  border-left: 6px solid var(--reserve-vif);
+}
+
+/* Un jour de semaine ordinaire : un filet, present mais efface. Ce qui y a
+   ete pose depuis la vue semaine reste lisible en miniature. */
+.jour-filet {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 5px 13px; border-radius: 9px; border: 1px dashed var(--line);
+}
+.jour-filet b { font-size: 11px; font-weight: 700; color: var(--muted); }
+.jour-filet .chiffre {
+  font-size: 12px; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums;
+}
+.jour-filet .petits { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.jour-filet .mini {
+  font-size: 10px; font-weight: 800; padding: 2px 7px; border-radius: 6px; color: #fff;
+  max-width: 230px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .62;
+}
+.jour-filet .mini.gael { background: var(--gael); }
+.jour-filet .mini.ingrid { background: var(--ingrid); }
+.jour-filet .mini.thomas { background: var(--thomas); }
+.jour-filet .mini.famille { background: var(--famille); }
+.jour-filet .off i { width: 14px; height: 14px; font-size: 8.5px; opacity: .8; }
+
+/* Numero de semaine ISO, discret, devant le titre. */
+.sem-num {
+  font-size: 11px; font-weight: 800; letter-spacing: .04em; color: var(--muted);
+  font-variant-numeric: tabular-nums; flex: none;
 }
 
 .acts { display: flex; flex-direction: column; gap: 5px; }
@@ -230,7 +307,14 @@ body.glisser-en-cours .act, body.glisser-en-cours .mini { cursor: grabbing; }
 .act.a_confirmer { border-style: dashed; border-color: currentColor; font-style: italic; }
 .act .verrou { flex: none; opacity: .5; font-size: 10px; padding-top: 2px; }
 
-.jour-pied { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+.jour-pied { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; margin-top: auto; }
+/* En vue semaine les colonnes sont etroites : un intitule long serait
+   coupe sur dix lignes et etirerait toute la rangee. On le borne, le texte
+   entier restant lisible dans l'infobulle et dans la fiche. */
+.grille7 .act .texte {
+  display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 .ajouter {
   align-self: flex-start; font-size: 12.5px; font-weight: 700; color: var(--muted);
   padding: 3px 9px; border-radius: 999px;
@@ -253,18 +337,21 @@ body.glisser-en-cours .act, body.glisser-en-cours .mini { cursor: grabbing; }
 }
 
 /* ------------------------------------------------------------- vue au mois */
-.mois-nav { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
-.mois-nav h2 { font-size: 23px; font-weight: 700; letter-spacing: -.015em; min-width: 200px; }
-.mois-nav button {
-  width: 34px; height: 34px; border-radius: 999px; border: 1px solid var(--line-strong);
-  color: var(--ink-2); font-size: 15px; display: grid; place-items: center; background: var(--surface);
-}
-.mois-nav button:hover:not([disabled]) { border-color: var(--ink-2); color: var(--ink); }
-.mois-nav button[disabled] { opacity: .35; cursor: default; }
 
+/* Une colonne etroite en tete pour les numeros de semaine, puis les 7 jours. */
+.bloc-mois { margin-bottom: 26px; }
 .grille-mois {
-  display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px;
+  display: grid; grid-template-columns: 30px repeat(7, minmax(0, 1fr)); gap: 6px;
 }
+.gouttiere {
+  display: grid; place-items: center; font-size: 10.5px; font-weight: 800;
+  color: var(--muted); font-variant-numeric: tabular-nums; letter-spacing: .03em;
+}
+/* La vue mois est informative : on y clique pour ouvrir la semaine. */
+.case-mois[data-va] { cursor: pointer; }
+.case-mois[data-va]:hover { border-color: var(--line-strong); }
+.case-mois[data-va]:focus-visible { outline: 2px solid var(--ink-2); outline-offset: 1px; }
+.pt-conge { width: 6px; height: 6px; border-radius: 999px; background: var(--gael); flex: none; }
 .grille-mois .entete {
   padding: 0 8px 4px; font-size: 11.5px; font-weight: 700; letter-spacing: .04em;
   color: var(--muted); text-align: center;
@@ -358,15 +445,32 @@ body.glisser-en-cours .act, body.glisser-en-cours .mini { cursor: grabbing; }
 @media (max-width: 900px) {
   .bandeau-mois { gap: 4px; margin-top: 26px; }
   .bandeau-mois .reserve-mois { margin-left: 0; flex-basis: 100%; }
-  .jours { grid-template-columns: 1fr; gap: 8px; }
+  .grille7 { grid-template-columns: 1fr; gap: 8px; }
 
   .jour { min-height: 0; }
-  .jour.ferme { display: none; }
+  /* Un jour sans activite tient sur une seule ligne : sinon une semaine vide
+     fait sept grandes cartes a faire defiler sur le telephone. */
+  .jour:not(.plein) {
+    flex-direction: row; align-items: center; flex-wrap: wrap; gap: 9px; padding: 8px 11px;
+  }
+  .jour:not(.plein) .jour-pied { margin-left: auto; }
+  .jour:not(.plein) .acts { display: none; }
+  .bouton-conge { opacity: .45; }
+
+  .jour.bande { flex-direction: column; align-items: stretch; }
+  .jour.bande .jour-tete { width: auto; }
+  .jour.bande .acts { flex-direction: column; }
+  .jour.bande .act { width: 100%; max-width: none; }
+  .jour.bande .jour-pied { margin-left: 0; }
+  .jour.bande.plein .jour-tete { width: auto; }
+
   .marque span { display: none; }
   .champ-recherche input { width: 148px; }
   .case-mois { min-height: 74px; padding: 5px; }
   .case-mois .mini { font-size: 10px; padding: 2px 5px; }
-  .grille-mois { gap: 4px; }
+  .grille-mois { gap: 3px; grid-template-columns: 22px repeat(7, minmax(0, 1fr)); }
+  .gouttiere { font-size: 9px; }
+  .grille-mois .entete { font-size: 10px; padding: 0 2px 3px; }
   .page { padding: 16px 12px 0; }
 }
 @media (max-width: 620px) {
@@ -375,12 +479,20 @@ body.glisser-en-cours .act, body.glisser-en-cours .mini { cursor: grabbing; }
   .marque b { font-size: 17px; }
   .qui-suis-je label { display: none; }
   .etat-sauvegarde { min-width: 0; }
+  /* La barre est collante : sur un telephone chaque rangee mange l'ecran, et
+     elle en faisait quatre. Le titre est deja sur l'icone de l'ecran d'accueil,
+     et l'export Excel se fait sur un ordinateur : tous deux quittent la barre. */
+  .marque { display: none; }
+  #btn-export { display: none; }
+  .champ-recherche { order: 3; }
+  .etat-sauvegarde { order: 5; }
+  .qui-suis-je.dans-le-pied { margin-top: 12px; }
+  .qui-suis-je.dans-le-pied label { display: inline; }
   .grille-mois .entete { font-size: 10px; padding: 0 2px 3px; }
   .case-mois .mini { font-size: 9.5px; padding: 2px 4px; border-radius: 5px; }
   .case-mois .marque-ferie { font-size: 8.5px; line-height: 1.2; }
   .case-mois .num { font-size: 11.5px; }
-  .mois-nav h2 { font-size: 19px; min-width: 0; }
-  .pied { padding: 0 12px; }
+    .pied { padding: 0 12px; }
 }
 
 /* ------------------------------------------------------ écran de connexion */
