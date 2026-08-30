@@ -431,6 +431,31 @@ body.glisser-en-cours .act, body.glisser-en-cours .mini { cursor: grabbing; }
 .btn.danger { color: var(--ingrid); margin-right: auto; }
 .btn.danger:hover { text-decoration: underline; }
 
+/* ------------------------------------------------- activités récurrentes */
+.champ-select {
+  width: 100%; background: var(--surface-2); border: 1.5px solid var(--line-strong);
+  border-radius: 12px; padding: 10px 12px; font-size: 14.5px; color: var(--ink); font-weight: 600;
+}
+.champ-select:focus { outline: none; border-color: var(--ink-2); }
+.aide-champ { font-size: 12.5px; color: var(--muted); margin-top: 6px; }
+
+.rappel-serie {
+  background: var(--faded); border: 1px solid var(--line); border-radius: 12px;
+  padding: 12px 14px; display: flex; flex-direction: column; align-items: flex-start; gap: 9px;
+}
+.rappel-serie p { font-size: 13px; color: var(--ink-2); }
+.rappel-serie b { color: var(--ink); }
+.rappel-serie .btn { font-size: 13px; padding: 7px 14px; }
+
+/* La question « ce jour-là ou toute la série ». Les deux réponses ont le même
+   poids visuel : ni l'une ni l'autre n'est le bon choix par défaut, et mettre
+   « toute la série » en avant pousserait vers l'option la plus destructrice. */
+.modale.etroite { width: min(400px, 100%); }
+.modale footer.portee { flex-direction: column; align-items: stretch; gap: 8px; }
+.modale footer.portee .btn { width: 100%; }
+.btn.muet { color: var(--muted); font-weight: 600; padding: 6px 18px; }
+.btn.muet:hover { color: var(--ink-2); }
+
 .pied { max-width: 1320px; margin: 36px auto 0; padding: 0 20px; font-size: 12.5px; color: var(--muted); }
 .legende { display: flex; flex-wrap: wrap; gap: 7px 16px; margin-bottom: 12px; }
 .legende span { display: inline-flex; align-items: center; gap: 6px; }
@@ -479,11 +504,9 @@ body.glisser-en-cours .act, body.glisser-en-cours .mini { cursor: grabbing; }
   .marque b { font-size: 17px; }
   .qui-suis-je label { display: none; }
   .etat-sauvegarde { min-width: 0; }
-  /* La barre est collante : sur un telephone chaque rangee mange l'ecran, et
-     elle en faisait quatre. Le titre est deja sur l'icone de l'ecran d'accueil,
-     et l'export Excel se fait sur un ordinateur : tous deux quittent la barre. */
+  /* La barre est collante : sur un telephone chaque rangee mange l'ecran.
+     Le titre est deja sur l'icone de l'ecran d'accueil, il quitte la barre. */
   .marque { display: none; }
-  #btn-export { display: none; }
   .champ-recherche { order: 3; }
   .etat-sauvegarde { order: 5; }
   .qui-suis-je.dans-le-pied { margin-top: 12px; }

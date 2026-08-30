@@ -173,7 +173,7 @@ function majHistorique() {
 /* ----------------------------------------------------- Supabase : lecture */
 async function charger() {
   const [acts, res, cgs] = await Promise.all([
-    sb.from("activites").select("id, jour, qui, texte, statut, origine, rang")
+    sb.from("activites").select("id, jour, qui, texte, statut, origine, rang, serie")
       .order("jour").order("rang"),
     sb.from("weekends_reserves").select("samedi"),
     sb.from("conges").select("jour, qui"),
@@ -188,7 +188,8 @@ async function charger() {
     if (!parJour[a.jour]) parJour[a.jour] = [];
     parJour[a.jour].push({
       id: a.id, qui: a.qui, texte: a.texte, statut: a.statut,
-      origine: a.origine, rang: a.rang == null ? parJour[a.jour].length : a.rang,
+      origine: a.origine, serie: a.serie || null,
+      rang: a.rang == null ? parJour[a.jour].length : a.rang,
     });
   }
   for (const liste of Object.values(parJour)) {
@@ -208,7 +209,7 @@ function indexer(activites) {
   for (const [jour, liste] of Object.entries(activites)) {
     for (const a of liste) index[a.id] = {
       jour, qui: a.qui, texte: a.texte, statut: a.statut,
-      origine: a.origine || null, rang: a.rang || 0,
+      origine: a.origine || null, serie: a.serie || null, rang: a.rang || 0,
     };
   }
   return index;
@@ -216,7 +217,7 @@ function indexer(activites) {
 
 function memeActivite(a, b) {
   return a.jour === b.jour && a.qui === b.qui && a.texte === b.texte
-      && a.statut === b.statut && a.rang === b.rang;
+      && a.statut === b.statut && a.rang === b.rang && a.serie === b.serie;
 }
 
 let minuteurPoussee = null;
@@ -466,7 +467,6 @@ function gabaritBarre() {
       <button class="bouton-icone" id="btn-retablir" title="Rétablir (Ctrl+Maj+Z)" aria-label="Rétablir">↷</button>
     </div>
     <button class="bouton-barre" id="btn-aujourdhui">Aujourd'hui</button>
-    <button class="bouton-barre" id="btn-export">Export Excel</button>
     <div class="qui-suis-je">
       <label for="moi" style="font-size:12.5px;text-transform:none;letter-spacing:0;color:inherit;margin:0">Je suis</label>
       <select id="moi"><option value="">—</option>${opts}</select>
@@ -831,6 +831,32 @@ function caseMois(iso, moisRef) {
 /* ------------------------------------------------------------------ modale */
 let modaleOuverte = null;
 
+/* A la creation : proposer de repeter. Sur une occurrence existante :
+   dire qu'elle appartient a une serie, et offrir d'y mettre fin. */
+function blocRecurrence(iso, existante) {
+  if (existante && existante.serie) {
+    const total = activitesDeSerie(existante.serie).length;
+    const restantes = activitesDeSerie(existante.serie).filter((x) => x.jour >= iso).length;
+    return `<div class="rappel-serie">
+      <p><b>Activité répétée</b> — ${total} occurrence${total > 1 ? "s" : ""} dans l'année,
+        ${JOURS_LONGS[jourSemaine(iso)].toLowerCase()}.</p>
+      <button type="button" class="btn discret" id="arreter-serie">
+        Arrêter la série à partir de ce jour (${restantes})</button>
+    </div>`;
+  }
+  if (existante) return "";
+  const jour = JOURS_LONGS[jourSemaine(iso)].toLowerCase();
+  const options = Object.entries(RECURRENCES)
+    .map(([cle, libelle]) => `<option value="${cle}">${libelle}</option>`).join("");
+  return `<div>
+    <label for="recurrence">Répéter</label>
+    <select id="recurrence" class="champ-select">
+      <option value="">Une seule fois</option>${options}
+    </select>
+    <p class="aide-champ">Toujours le ${jour}, jusqu'à la fin de l'année scolaire.</p>
+  </div>`;
+}
+
 function ouvrirModale({ iso, id }) {
   const existante = id ? actesDe(iso).find((a) => a.id === id) : null;
   const info = CAL.jours[iso];
@@ -861,6 +887,7 @@ function ouvrirModale({ iso, id }) {
         <textarea id="texte-act" placeholder="Ex. : Match U18 à Annecy, départ 8h">${existante ? echapper(existante.texte) : ""}</textarea></div>
       <label class="interrupteur"><input type="checkbox" id="a-confirmer"
         ${existante && existante.statut === "a_confirmer" ? "checked" : ""}> À confirmer</label>
+      ${blocRecurrence(iso, existante)}
     </div>
     <footer>
       ${existante ? `<button class="btn danger" id="supprimer">Supprimer</button>` : ""}
@@ -885,8 +912,15 @@ function ouvrirModale({ iso, id }) {
 
   $("#annuler", voile).addEventListener("click", () => fermerModale(voile));
   const supp = $("#supprimer", voile);
-  if (supp) supp.addEventListener("click", () => { supprimerActivite(iso, id); fermerModale(voile); });
+  if (supp) supp.addEventListener("click", () => { fermerModale(voile); supprimerAvecPortee(iso, id); });
   $("#valider", voile).addEventListener("click", () => { validerModale(voile); });
+
+  const stop = $("#arreter-serie", voile);
+  if (stop) stop.addEventListener("click", () => {
+    const acte = actesDe(iso).find((a) => a.id === id);
+    fermerModale(voile);
+    if (acte && acte.serie) arreterSerie(acte.serie, iso);
+  });
   champ.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) validerModale(voile);
   });
@@ -901,29 +935,178 @@ function fermerModale(voile) {
   modaleOuverte = null;
 }
 
-function validerModale(voile) {
+async function validerModale(voile) {
   const texte = $("#texte-act", voile).value.trim();
   const statut = $("#a-confirmer", voile).checked ? "a_confirmer" : "confirme";
+  const champRegle = $("#recurrence", voile);
+  const regle = champRegle ? champRegle.value : "";
   const { iso, id, qui } = modaleOuverte;
-  if (!texte) { if (id) supprimerActivite(iso, id); fermerModale(voile); return; }
+  const existante = id ? actesDe(iso).find((a) => a.id === id) : null;
 
+  if (!texte) {
+    fermerModale(voile);
+    if (id) await supprimerAvecPortee(iso, id);
+    return;
+  }
+
+  /* Modifier une occurrence : la portee se demande avant de fermer la fiche,
+     pour qu'on puisse encore renoncer sans rien perdre. */
+  let portee = "un";
+  if (existante && existante.serie) {
+    portee = await demanderPortee({
+      action: "modifier", nombre: activitesDeSerie(existante.serie).length,
+    });
+    if (!portee) return;                     // annule : la fiche reste ouverte
+  }
   fermerModale(voile);
+
+  if (!existante && regle) { creerSerie(iso, { qui, texte, statut, regle }); return; }
+
   appliquer(() => {
     if (!ETAT.activites[iso]) ETAT.activites[iso] = [];
     const liste = ETAT.activites[iso];
-    const existante = id ? liste.find((a) => a.id === id) : null;
-    if (existante) { existante.qui = qui; existante.texte = texte; existante.statut = statut; }
-    else liste.push({ id: idUnique(), qui, texte, statut, rang: liste.length });
+    const cible = id ? liste.find((a) => a.id === id) : null;
+    if (!cible) {
+      liste.push({ id: idUnique(), qui, texte, statut, serie: null, rang: liste.length });
+    } else if (portee === "serie") {
+      for (const { a } of activitesDeSerie(cible.serie)) {
+        a.qui = qui; a.texte = texte; a.statut = statut;
+      }
+    } else {
+      cible.qui = qui; cible.texte = texte; cible.statut = statut;
+    }
     reordonner(iso);
   });
 }
 
-function supprimerActivite(iso, id) {
-  appliquer(() => {
-    ETAT.activites[iso] = actesDe(iso).filter((a) => a.id !== id);
-    if (!ETAT.activites[iso].length) delete ETAT.activites[iso];
-    else reordonner(iso);
+/* Supprimer une occurrence : meme question, sauf si elle est isolee. */
+async function supprimerAvecPortee(iso, id) {
+  const acte = actesDe(iso).find((a) => a.id === id);
+  if (!acte) return;
+  if (!acte.serie) { supprimerActivite(iso, id); return; }
+  const portee = await demanderPortee({
+    action: "supprimer", nombre: activitesDeSerie(acte.serie).length,
   });
+  if (!portee) return;
+  supprimerActivite(iso, id, portee);
+}
+
+/* ==================================================================== */
+/*  Activites recurrentes                                               */
+/*                                                                      */
+/*  Une recurrence cree une vraie ligne par occurrence, toutes marquees  */
+/*  du meme identifiant de serie. Le reste de l'application — glisser,   */
+/*  ordre dans la journee, copier-coller, recherche — continue donc de   */
+/*  fonctionner sans rien savoir des series.                            */
+/* ==================================================================== */
+
+const RECURRENCES = {
+  hebdo: "Chaque semaine",
+  hebdo_hors_vacances: "Chaque semaine, hors vacances scolaires",
+};
+
+/* Modifier ou supprimer une occurrence : on demande la portee, comme le
+   font les agendas classiques. Renvoie "un", "serie", ou null si on
+   renonce. */
+function demanderPortee({ action, nombre }) {
+  return new Promise((resoudre) => {
+    const voile = document.createElement("div");
+    voile.className = "voile";
+    voile.innerHTML = `<div class="modale etroite" role="dialog" aria-modal="true"
+        aria-label="Portée de la modification">
+      <header>
+        <h3>${action === "supprimer" ? "Supprimer" : "Enregistrer"} quoi ?</h3>
+        <p>Cette activité se répète. Elle compte ${nombre} occurrences dans l'année.</p>
+      </header>
+      <footer class="portee">
+        <button class="btn discret" data-portee="un">Ce jour-là seulement</button>
+        <button class="btn discret" data-portee="serie">Toute la série</button>
+        <button class="btn muet" data-portee="">Annuler</button>
+      </footer>
+    </div>`;
+    const finir = (valeur) => {
+      document.removeEventListener("keydown", echap);
+      voile.remove();
+      resoudre(valeur || null);
+    };
+    const echap = (e) => { if (e.key === "Escape") { e.stopPropagation(); finir(null); } };
+    voile.addEventListener("click", (e) => {
+      if (e.target === voile) return finir(null);
+      const b = e.target.closest("[data-portee]");
+      if (b) finir(b.dataset.portee);
+    });
+    document.addEventListener("keydown", echap);
+    document.body.appendChild(voile);
+    voile.querySelector('[data-portee="serie"]').focus();
+  });
+}
+
+/* Les dates d'une serie : meme jour de la semaine, jusqu'au bout de
+   l'annee scolaire. Le jour choisi est toujours garde, meme s'il tombe
+   en vacances : c'est celui que la personne a designe. */
+function datesDeSerie(depart, regle) {
+  const dates = [depart];
+  const dernier = CAL.semaines[CAL.semaines.length - 1];
+  const fin = decaler(dernier, 6);
+  for (let j = decaler(depart, 7); j <= fin; j = decaler(j, 7)) {
+    if (!dansLAnnee(j)) continue;
+    if (regle === "hebdo_hors_vacances" && (infoJour(j) || {}).vac) continue;
+    dates.push(j);
+  }
+  return dates;
+}
+
+function activitesDeSerie(serie) {
+  const trouvees = [];
+  for (const [jour, liste] of Object.entries(ETAT.activites)) {
+    for (const a of liste) if (a.serie && a.serie === serie) trouvees.push({ jour, a });
+  }
+  return trouvees.sort((x, y) => x.jour.localeCompare(y.jour));
+}
+
+function creerSerie(iso, { qui, texte, statut, regle }) {
+  const serie = idUnique();
+  const dates = datesDeSerie(iso, regle);
+  appliquer(() => {
+    for (const jour of dates) {
+      if (!ETAT.activites[jour]) ETAT.activites[jour] = [];
+      const liste = ETAT.activites[jour];
+      liste.push({ id: idUnique(), qui, texte, statut, serie, rang: liste.length });
+      reordonner(jour);
+    }
+  });
+  annoncer(`${dates.length} occurrences ajoutées, du ${jjmm(dates[0])} au ${jjmm(dates[dates.length - 1])}.`);
+}
+
+/* « Arreter la serie a partir d'ici » : on retire cette occurrence et
+   toutes les suivantes, en laissant le passe intact. */
+function arreterSerie(serie, iso) {
+  const restantes = activitesDeSerie(serie).filter((x) => x.jour >= iso);
+  if (!restantes.length) return;
+  appliquer(() => {
+    for (const { jour, a } of restantes) {
+      ETAT.activites[jour] = actesDe(jour).filter((x) => x.id !== a.id);
+      if (!ETAT.activites[jour].length) delete ETAT.activites[jour];
+      else reordonner(jour);
+    }
+  });
+  annoncer(`Série arrêtée : ${restantes.length} occurrences retirées à partir du ${jjmm(iso)}.`);
+}
+
+function supprimerActivite(iso, id, portee = "un") {
+  const acte = actesDe(iso).find((a) => a.id === id);
+  const cibles = (portee === "serie" && acte && acte.serie)
+    ? activitesDeSerie(acte.serie)
+    : [{ jour: iso, a: acte }];
+  appliquer(() => {
+    for (const { jour, a } of cibles) {
+      if (!a) continue;
+      ETAT.activites[jour] = actesDe(jour).filter((x) => x.id !== a.id);
+      if (!ETAT.activites[jour].length) delete ETAT.activites[jour];
+      else reordonner(jour);
+    }
+  });
+  if (portee === "serie") annoncer(`Série supprimée : ${cibles.length} occurrences.`);
 }
 
 function basculerConge(iso, qui = "gael") {
@@ -1045,23 +1228,6 @@ function annoncer(message) {
   clearTimeout(annoncer._t);
   annoncer._t = setTimeout(() => majEtatSauvegarde("ok"), 3200);
 }
-
-/* ------------------------------------------------------------------ export */
-function exporterExcel() {
-  const octets = genererXlsx(CAL, { activites: ETAT.activites, sanctuarises: ETAT.reserves });
-  const blob = new Blob([octets], {
-    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  });
-  const url = URL.createObjectURL(blob);
-  const lien = document.createElement("a");
-  lien.href = url;
-  lien.download = "Week-ends_Riethmuller_2026-2027.xlsx";
-  document.body.appendChild(lien);
-  lien.click();
-  lien.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 4000);
-}
-
 
 /* ====================================================================== */
 /*  Glisser-deposer au pointeur                                           */
@@ -1315,7 +1481,6 @@ function brancherBarre() {
   $("#btn-annuler").addEventListener("click", annuler);
   $("#btn-retablir").addEventListener("click", retablir);
   $("#btn-aujourdhui").addEventListener("click", allerAujourdhui);
-  $("#btn-export").addEventListener("click", exporterExcel);
 
   const deco = $("#btn-deconnexion");
   if (deco) deco.addEventListener("click", () => sb.auth.signOut());
@@ -1362,7 +1527,7 @@ function brancherContenu() {
     b.addEventListener("click", (e) => {
       e.stopPropagation();
       const [iso, id] = b.dataset.supprimer.split("|");
-      supprimerActivite(iso, id);
+      supprimerAvecPortee(iso, id);
     }));
 
   zone.querySelectorAll("[data-modifier]").forEach((b) => {
