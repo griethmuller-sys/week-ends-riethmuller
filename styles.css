@@ -188,6 +188,11 @@ h1, h2, h3 { font-family: "Nunito", "Nunito Sans", system-ui, sans-serif; }
   opacity: .95; box-shadow: 0 12px 28px -10px rgba(20, 30, 40, .45);
   transform: translate3d(-9999px, -9999px, 0);
 }
+/* Au doigt, la vignette saisie grossit un peu : c'est le seul retour possible,
+   iOS ne permettant pas de vibration depuis une page web. */
+.fantome-doigt { box-shadow: 0 14px 32px -10px rgba(20, 30, 40, .55); }
+.fantome-doigt .act, .fantome-doigt.act { outline: 2px solid var(--ink-2); outline-offset: 1px; }
+
 body.glisser-en-cours { cursor: grabbing; -webkit-user-select: none; user-select: none; }
 body.glisser-en-cours .act, body.glisser-en-cours .mini { cursor: grabbing; }
 

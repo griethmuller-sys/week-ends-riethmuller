@@ -765,8 +765,8 @@ function exporterExcel() {
 /*  Le glisser-deposer HTML5 est ecarte : Safari le prend en defaut et    */
 /*  fige la page. On suit donc le pointeur nous-memes, ce qui donne un    */
 /*  comportement identique dans tous les navigateurs.                     */
-/*  Souris et stylet uniquement : au doigt, ce sont les fleches ↑ ↓ qui   */
-/*  rangent la journee.                                                   */
+/*  Souris et stylet : le geste demarre des que le pointeur bouge.        */
+/*  Au doigt : appui long, pour ne pas confondre avec un defilement.      */
 /* ====================================================================== */
 
 /* Horodatage plutot qu'un drapeau : apres un glisser, la page est redessinee et
@@ -774,21 +774,25 @@ function exporterExcel() {
    et avalerait le clic suivant ; un horodatage expire tout seul. */
 let finDuGeste = 0;
 
+const APPUI_LONG = 420;        // millisecondes avant qu'un appui devienne un glisser
+const TOLERANCE_DOIGT = 12;    // au-dela, c'est un defilement, pas un appui
+
 const TIRAGE = {
-  element: null, iso: null, id: null, pointerId: null,
-  x0: 0, y0: 0, decalageX: 0, decalageY: 0,
+  element: null, iso: null, id: null, pointerId: null, tactile: false,
+  x0: 0, y0: 0, x: 0, y: 0, decalageX: 0, decalageY: 0,
   fantome: null, cible: null, avant: false, jour: null, actif: false,
+  attente: null, boucle: null,
 };
 
 function preparerTirage(e, el) {
-  if (e.pointerType === "touch") return;            // au doigt : fleches ↑ ↓
-  if (e.button !== 0) return;
+  if (e.pointerType === "mouse" && e.button !== 0) return;
   if (e.target.closest(".act-actions")) return;
 
   const [iso, id] = el.dataset.glisser.split("|");
+  const tactile = e.pointerType === "touch";
   Object.assign(TIRAGE, {
-    element: el, iso, id, pointerId: e.pointerId,
-    x0: e.clientX, y0: e.clientY,
+    element: el, iso, id, pointerId: e.pointerId, tactile,
+    x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY,
     cible: null, avant: false, jour: null, actif: false,
   });
 
@@ -796,6 +800,23 @@ function preparerTirage(e, el) {
   window.addEventListener("pointerup", surRelachement);
   window.addEventListener("pointercancel", abandonnerTirage);
   window.addEventListener("keydown", echapTirage);
+
+  /* Au doigt, seul un appui immobile declenche le glisser : sinon on laisse la
+     page defiler normalement. Le listener touchmove n'est pas passif, faute de
+     quoi il serait impossible d'arreter ce defilement une fois le geste engage. */
+  if (tactile) {
+    window.addEventListener("touchmove", bloquerDefilement, { passive: false });
+    TIRAGE.attente = setTimeout(() => {
+      TIRAGE.attente = null;
+      demarrerTirage();
+      placerFantome(TIRAGE.x, TIRAGE.y);
+      viserDestination(TIRAGE.x, TIRAGE.y);
+    }, APPUI_LONG);
+  }
+}
+
+function bloquerDefilement(e) {
+  if (TIRAGE.actif) e.preventDefault();
 }
 
 function demarrerTirage() {
@@ -808,6 +829,7 @@ function demarrerTirage() {
 
   const fantome = TIRAGE.element.cloneNode(true);
   fantome.classList.add("fantome");
+  if (TIRAGE.tactile) fantome.classList.add("fantome-doigt");
   fantome.classList.remove("insert-avant", "insert-apres");
   fantome.style.width = cadre.width + "px";
   document.body.appendChild(fantome);
@@ -818,11 +840,17 @@ function demarrerTirage() {
 
   clearTimeout(chronoGlisser);
   chronoGlisser = setTimeout(abandonnerTirage, 30000);
+
+  cancelAnimationFrame(TIRAGE.boucle);
+  TIRAGE.boucle = requestAnimationFrame(boucleDefilement);
 }
 
 function placerFantome(x, y) {
+  /* Au doigt, la vignette est remontee : sinon la main cache ce qu'on deplace. */
+  const remontee = TIRAGE.tactile ? 28 : 0;
   TIRAGE.fantome.style.transform =
-    `translate3d(${Math.round(x - TIRAGE.decalageX)}px, ${Math.round(y - TIRAGE.decalageY)}px, 0)`;
+    `translate3d(${Math.round(x - TIRAGE.decalageX)}px, `
+    + `${Math.round(y - TIRAGE.decalageY - remontee)}px, 0)`;
 }
 
 /* On ne touche au DOM que si la destination a reellement change : sans cette
@@ -856,19 +884,42 @@ function viserDestination(x, y) {
   TIRAGE.jour = jour;
 }
 
-/* Fait defiler la page quand on approche du bord : sans cela, impossible de
-   deposer une activite sur un week-end hors ecran. */
-function defilerSiBesoin(y) {
-  const marge = 80, vitesse = 16;
-  if (y < marge) window.scrollBy(0, -vitesse);
-  else if (y > window.innerHeight - marge) window.scrollBy(0, vitesse);
+/* Fait defiler la page tant que le pointeur reste pres d'un bord. Une boucle
+   continue plutot qu'un appel par mouvement : au doigt, on s'immobilise souvent
+   en bas de l'ecran en attendant que la page monte. */
+function boucleDefilement() {
+  if (!TIRAGE.actif) return;
+  const marge = TIRAGE.tactile ? 110 : 80;
+  const vitesse = 14;
+  const y = TIRAGE.y;
+  let pas = 0;
+
+  if (y < marge) pas = -vitesse * Math.min(1, (marge - y) / marge + 0.3);
+  else if (y > window.innerHeight - marge) {
+    pas = vitesse * Math.min(1, (y - (window.innerHeight - marge)) / marge + 0.3);
+  }
+
+  if (pas) {
+    const avant = window.scrollY;
+    window.scrollBy(0, pas);
+    /* La page a bouge sous le pointeur : la destination visee change aussi. */
+    if (window.scrollY !== avant) viserDestination(TIRAGE.x, TIRAGE.y);
+  }
+  TIRAGE.boucle = requestAnimationFrame(boucleDefilement);
 }
 
 function surDeplacement(e) {
   if (e.pointerId !== TIRAGE.pointerId) return;
+  TIRAGE.x = e.clientX;
+  TIRAGE.y = e.clientY;
 
   if (!TIRAGE.actif) {
     const distance = Math.hypot(e.clientX - TIRAGE.x0, e.clientY - TIRAGE.y0);
+    if (TIRAGE.tactile) {
+      /* Le doigt a bouge avant la fin de l'appui long : c'est un defilement. */
+      if (distance > TOLERANCE_DOIGT) abandonnerTirage();
+      return;
+    }
     if (distance < 6) return;                       // simple clic, pas un glisser
     demarrerTirage();
   }
@@ -876,7 +927,6 @@ function surDeplacement(e) {
   e.preventDefault();
   placerFantome(e.clientX, e.clientY);
   viserDestination(e.clientX, e.clientY);
-  defilerSiBesoin(e.clientY);
 }
 
 function rangerTirage() {
@@ -884,7 +934,12 @@ function rangerTirage() {
   window.removeEventListener("pointerup", surRelachement);
   window.removeEventListener("pointercancel", abandonnerTirage);
   window.removeEventListener("keydown", echapTirage);
+  window.removeEventListener("touchmove", bloquerDefilement, { passive: false });
   clearTimeout(chronoGlisser);
+  clearTimeout(TIRAGE.attente);
+  cancelAnimationFrame(TIRAGE.boucle);
+  TIRAGE.attente = null;
+  TIRAGE.boucle = null;
 
   if (TIRAGE.fantome) TIRAGE.fantome.remove();
   document.body.classList.remove("glisser-en-cours");
