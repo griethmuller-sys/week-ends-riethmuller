@@ -350,7 +350,7 @@ function gabaritPied() {
       ${PERSONNES.map((p) => l(p.id, p.nom)).join("")}
       <span><i style="background:var(--vac);border:1px solid var(--vac-line)"></i>Vacances scolaires</span>
       <span><i style="background:var(--ferie-bg);border:1px solid var(--ferie-line)"></i>Jour férié ou pont</span>
-      <span><i style="background:var(--reserve);border:1px solid var(--reserve-line)"></i>★ Week-end réservé</span>
+      <span><i style="background:var(--reserve);border:1px solid var(--reserve-line);border-left:4px solid var(--reserve-vif)"></i>★ Week-end réservé</span>
     </div>
     <p>Colonnes jeudi, vendredi et lundi ouvertes uniquement les jours fériés en France ou à Genève,
     les jours sans classe et les ponts posés. Les activités scoutes de Thomas portent un cadenas :

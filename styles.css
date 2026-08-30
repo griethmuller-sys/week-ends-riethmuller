@@ -15,7 +15,11 @@ button { cursor: pointer; }
 
   --vac:#E9F9F1; --vac-line:#BCE9D4; --vac-ink:#0F6B44;
   --ferie-line:#F0D284; --ferie-ink:#8A6408; --ferie-bg:#FFE9A8;
-  --reserve:#F1ECFE; --reserve-line:#D5C6F9; --reserve-ink:#6440C4;
+  /* Week-ends sanctuarises : turquoise, la seule zone du cercle chromatique
+     encore libre (bleu = Gael, magenta = Ingrid, vert = Thomas et vacances,
+     orange = famille et jours feries). Le ruban de gauche porte le signal. */
+  --reserve:#F0FAFC; --reserve-line:#7FCBD6; --reserve-ink:#075C68; --reserve-vif:#0B7482;
+  --ruban: 7px;
 
   /* Les quatre couleurs de la famille, en aplat. Le texte posé dessus est blanc :
      chaque teinte est donc assez profonde pour rester lisible en plein soleil. */
@@ -109,7 +113,11 @@ h1, h2, h3 { font-family: "Fredoka", "Nunito Sans", system-ui, sans-serif; }
 }
 .we.vacances { border-color: var(--vac-line); }
 .we.libre { background: var(--surface-2); }
-.we.reserve { border-color: var(--reserve-line); background: var(--reserve); }
+.we.reserve {
+  background: var(--reserve);
+  border: 2px solid var(--reserve-line);
+  border-left: var(--ruban) solid var(--reserve-vif);
+}
 
 .we-tete {
   display: flex; align-items: center; gap: 9px; flex-wrap: wrap; padding: 11px 16px 10px;
@@ -127,7 +135,7 @@ h1, h2, h3 { font-family: "Fredoka", "Nunito Sans", system-ui, sans-serif; }
 .puce.libre { color: var(--muted); border-color: var(--line-strong); font-weight: 600; }
 .puce.scout { background: var(--thomas-bg); color: var(--thomas); }
 
-.puce.reserve { background: var(--reserve-ink); color: #fff; }
+.puce.reserve { background: var(--reserve-vif); color: #fff; }
 
 .bouton-reserver {
   font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 999px;
@@ -144,7 +152,7 @@ h1, h2, h3 { font-family: "Fredoka", "Nunito Sans", system-ui, sans-serif; }
   padding: 9px 11px 11px; min-height: 96px; display: flex; flex-direction: column; gap: 7px;
 }
 .we.vacances .jour { background: color-mix(in srgb, var(--vac) 45%, var(--surface)); border-color: var(--vac-line); }
-.we.reserve .jour { background: color-mix(in srgb, var(--surface) 72%, var(--reserve)); border-color: var(--reserve-line); }
+.we.reserve .jour { background: var(--surface); border-color: var(--reserve-line); }
 .jour.ferme {
   background: transparent; border-style: dashed; border-color: var(--line);
   min-height: 0; align-self: start; padding: 7px 11px; gap: 0;
@@ -269,7 +277,11 @@ body.glisser-en-cours .act, body.glisser-en-cours .mini { cursor: grabbing; }
 .case-mois.semaine { background: var(--faded); border-color: transparent; }
 .case-mois.vacances { background: var(--vac); border-color: var(--vac-line); }
 .case-mois.semaine.vacances { background: color-mix(in srgb, var(--vac) 50%, var(--faded)); }
-.case-mois.reserve { border-color: var(--reserve-line); background: var(--reserve); }
+.case-mois.reserve {
+  background: var(--reserve);
+  border: 2px solid var(--reserve-line);
+  border-left: 5px solid var(--reserve-vif);
+}
 .case-mois .num { font-size: 13px; font-weight: 700; color: var(--ink-2); display: flex; align-items: center; gap: 5px; }
 .case-mois.semaine .num, .case-mois.hors .num { color: var(--muted); font-weight: 400; }
 .case-mois .aujourdhui {

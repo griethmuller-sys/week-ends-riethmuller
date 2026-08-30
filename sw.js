@@ -2,7 +2,7 @@
    Les données (Supabase) passent toujours par le réseau : ce cache sert à
    ouvrir la page instantanément, et à afficher quelque chose hors connexion. */
 
-const CACHE = "riethmuller-v3";
+const CACHE = "riethmuller-v4";
 const COQUILLE = [
   "./",
   "index.html",
