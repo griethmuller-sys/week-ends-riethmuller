@@ -1,0 +1,530 @@
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body, h1, h2, h3, p, ul, ol, li, figure, button, input, select, textarea {
+  margin: 0; padding: 0; border: 0; font: inherit; color: inherit; background: none;
+}
+ul, ol { list-style: none; }
+button { cursor: pointer; }
+
+:root {
+  color-scheme: light;                 /* l'application reste claire, jour et nuit */
+
+  --ground:#FFFDF7; --surface:#FFFFFF; --surface-2:#FFFBF1; --surface-3:#F5F0E3;
+  --ink:#1F2430; --ink-2:#4A5262; --muted:#7C8494;
+  --line:#EDE7D9; --line-strong:#D8D0BD; --faded:#FAF6EC;
+
+  --vac:#E9F9F1; --vac-line:#BCE9D4; --vac-ink:#0F6B44;
+  --ferie-line:#F0D284; --ferie-ink:#8A6408; --ferie-bg:#FFE9A8;
+  /* Week-ends sanctuarises : turquoise, la seule zone du cercle chromatique
+     encore libre (bleu = Gael, magenta = Ingrid, vert = Thomas et vacances,
+     orange = famille et jours feries). Le ruban de gauche porte le signal. */
+  --reserve:#F0FAFC; --reserve-line:#7FCBD6; --reserve-ink:#075C68; --reserve-vif:#0B7482;
+  --ruban: 7px;
+
+  /* Les quatre couleurs de la famille, en aplat. Le texte posé dessus est blanc :
+     chaque teinte est donc assez profonde pour rester lisible en plein soleil. */
+  --gael:#2A63C9; --ingrid:#C92765; --thomas:#137C46; --famille:#B05904;
+  --gael-bg:#E7EEFB; --ingrid-bg:#FBE7EF; --thomas-bg:#E4F3EB; --famille-bg:#FBEEDD;
+  --sur-couleur:#FFFFFF;
+
+  --r: 18px; --r-s: 12px;
+}
+
+body {
+  background: var(--ground); color: var(--ink);
+  font-family: "Nunito Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 15px; line-height: 1.55; font-variant-numeric: tabular-nums;
+  padding-bottom: 80px;
+}
+h1, h2, h3 { font-family: "Fredoka", "Nunito Sans", system-ui, sans-serif; }
+
+/* ------------------------------------------------------------ barre haute */
+.barre {
+  position: sticky; top: 0; z-index: 40;
+  background: var(--ground); border-bottom: 1px solid var(--line);
+}
+.barre-in {
+  max-width: 1320px; margin: 0 auto; padding: 12px 20px;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px;
+}
+.marque { display: flex; flex-direction: column; margin-right: auto; }
+.marque b { font-family: "Fredoka", sans-serif; font-weight: 700; font-size: 19px; letter-spacing: -.015em; }
+.marque span { font-size: 12px; color: var(--muted); }
+
+.onglets { display: flex; gap: 3px; background: var(--surface-3); padding: 3px; border-radius: 999px; }
+.onglets button {
+  font-size: 13.5px; font-weight: 600; padding: 6px 16px; border-radius: 999px;
+  color: var(--ink-2); transition: background .15s, color .15s;
+}
+.onglets button[aria-selected="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,.07); }
+.onglets button:hover:not([aria-selected="true"]) { color: var(--ink); }
+
+.champ-recherche { position: relative; display: flex; align-items: center; }
+.champ-recherche input {
+  background: var(--surface); border: 1px solid var(--line-strong);
+  border-radius: 999px; padding: 7px 30px 7px 34px; font-size: 13.5px; width: 180px; color: var(--ink);
+}
+.champ-recherche input::-webkit-search-cancel-button { margin-right: 2px; }
+.champ-recherche input::placeholder { color: var(--muted); }
+.champ-recherche input:focus { outline: none; border-color: var(--ink-2); }
+.champ-recherche svg { position: absolute; left: 12px; width: 14px; height: 14px; color: var(--muted); }
+
+.groupe-histo, .groupe-nav { display: flex; gap: 3px; }
+.bouton-icone {
+  width: 32px; height: 32px; border-radius: 999px; border: 1px solid var(--line-strong);
+  color: var(--ink-2); font-size: 16px; line-height: 1; display: grid; place-items: center;
+}
+.bouton-icone:hover:not([disabled]) { background: var(--surface); border-color: var(--ink-2); color: var(--ink); }
+.bouton-icone[disabled] { opacity: .3; cursor: default; }
+
+.bouton-barre {
+  font-size: 13.5px; font-weight: 600; padding: 7px 14px; border-radius: 999px;
+  border: 1px solid var(--line-strong); color: var(--ink-2);
+}
+.bouton-barre:hover { background: var(--surface); border-color: var(--ink-2); color: var(--ink); }
+.bouton-barre[disabled] { opacity: .5; cursor: default; }
+
+.qui-suis-je { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--muted); }
+.qui-suis-je select {
+  background: var(--surface); border: 1px solid var(--line-strong);
+  border-radius: 999px; padding: 6px 11px; font-size: 13px; color: var(--ink); font-weight: 600;
+}
+
+.etat-sauvegarde { font-size: 12px; color: var(--muted); margin-left: auto; text-align: right; }
+
+/* --------------------------------------------------------------- contenu */
+.page { max-width: 1320px; margin: 0 auto; padding: 22px 20px 0; }
+
+.bandeau-mois {
+  display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin: 34px 0 14px;
+}
+.bandeau-mois:first-child { margin-top: 6px; }
+.bandeau-mois h2 {
+  font-family: "Fredoka", sans-serif; font-weight: 700; font-size: 21px; letter-spacing: -.015em;
+}
+.bandeau-mois .reserve-mois { font-size: 13px; color: var(--reserve-ink); margin-left: auto; }
+.bandeau-mois .reserve-mois b { font-weight: 700; }
+.bandeau-mois .reserve-mois.manquant { color: var(--muted); }
+
+/* ------------------------------------------------------ carte de week-end */
+.we {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r);
+  margin-bottom: 12px; overflow: hidden;
+}
+.we.vacances { border-color: var(--vac-line); }
+.we.libre { background: var(--surface-2); }
+.we.reserve {
+  background: var(--reserve);
+  border: 2px solid var(--reserve-line);
+  border-left: var(--ruban) solid var(--reserve-vif);
+}
+
+.we-tete {
+  display: flex; align-items: center; gap: 9px; flex-wrap: wrap; padding: 11px 16px 10px;
+}
+.we-dates { font-family: "Fredoka", sans-serif; font-weight: 700; font-size: 16px; letter-spacing: -.01em; }
+.we.reserve .we-dates { color: var(--reserve-ink); }
+.we-actions { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+
+.puce {
+  font-size: 11.5px; font-weight: 700; padding: 3px 10px; border-radius: 999px;
+  border: 1px solid transparent; white-space: nowrap;
+}
+.puce.vac { background: var(--vac); color: var(--vac-ink); }
+.puce.long { background: var(--ferie-bg); color: var(--ferie-ink); }
+.puce.libre { color: var(--muted); border-color: var(--line-strong); font-weight: 600; }
+.puce.scout { background: var(--thomas-bg); color: var(--thomas); }
+
+.puce.reserve { background: var(--reserve-vif); color: #fff; }
+
+.bouton-reserver {
+  font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 999px;
+  border: 1px solid var(--line-strong); color: var(--muted);
+}
+.bouton-reserver:hover { border-color: var(--reserve-ink); color: var(--reserve-ink); background: var(--reserve); }
+.we.reserve .bouton-reserver { border-color: var(--reserve-line); color: var(--reserve-ink); }
+
+.we-note { font-size: 12.5px; color: var(--muted); padding: 0 16px 4px; }
+
+.jour {
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-s);
+  padding: 9px 11px 11px; min-height: 96px; display: flex; flex-direction: column; gap: 7px;
+  min-width: 0;
+}
+.we.vacances .jour { background: color-mix(in srgb, var(--vac) 45%, var(--surface)); border-color: var(--vac-line); }
+.we.reserve .jour { background: var(--surface); border-color: var(--reserve-line); }
+.jour-tete { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.jour-tete b { font-size: 12px; font-weight: 800; color: var(--ink-2); }
+.jour-tete .chiffre { font-size: 14.5px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.jour.we .jour-tete b { color: var(--ink); }
+/* Plus specifique que la regle week-end ci-dessus : sinon le chiffre reste
+   sombre sur la pastille sombre et devient illisible. */
+.jour.aujourdhui .chiffre {
+  background: var(--ink); color: var(--ground); border-radius: 999px;
+  min-width: 23px; height: 23px; display: inline-grid; place-items: center;
+  font-size: 12.5px; padding: 0 6px;
+}
+
+/* ------------------------------------------------- vue semaine : 7 colonnes */
+.grille7 { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; padding: 0 12px 12px; }
+.we.semaine .jour.we { background: var(--faded); border-color: var(--line-strong); }
+.we.semaine .jour.res {
+  background: var(--reserve); border: 1px solid var(--reserve-line);
+  border-left: 6px solid var(--reserve-vif);
+}
+
+/* Les etiquettes du jour : ferie France ou Geneve, pont, conge. */
+.marques { display: flex; flex-wrap: wrap; gap: 4px; }
+.marq {
+  font-size: 10px; font-weight: 800; padding: 2px 7px; border-radius: 7px; line-height: 1.35;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.marq.ferie { background: var(--ferie-bg); color: var(--ferie-ink); }
+.marq.conge { background: var(--gael-bg); color: var(--gael); border: 1px dashed var(--gael); }
+.bouton-conge { cursor: pointer; opacity: 0; transition: opacity .12s; }
+.jour:hover .bouton-conge, .bouton-conge:focus-visible, .bouton-conge.pose { opacity: 1; }
+
+/* Qui ne travaille pas ce jour-la. */
+.off { display: inline-flex; gap: 3px; align-items: center; }
+.off i {
+  width: 15px; height: 15px; border-radius: 5px; display: grid; place-items: center;
+  font-size: 9px; font-weight: 800; font-style: normal;
+  background: var(--faded); color: #C3BCAC;
+}
+.off i.gael.on { background: var(--gael); color: #fff; }
+.off i.ingrid.on { background: var(--ingrid); color: #fff; }
+.off i.thomas.on { background: var(--thomas); color: #fff; }
+.lecture-seule {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+}
+
+/* ------------------------------------------ vue week-end : les jours empiles */
+.pile-we { display: flex; flex-direction: column; gap: 7px; padding: 0 12px 12px; }
+.jour.bande {
+  flex-direction: row; align-items: flex-start; flex-wrap: wrap; gap: 11px;
+  min-height: 0; padding: 10px 13px;
+}
+.jour.bande .jour-tete { width: 116px; flex: none; }
+.jour.bande .marques { flex: none; max-width: 250px; }
+.jour.bande .acts { flex-direction: row; flex-wrap: wrap; flex: 1; min-width: 160px; }
+.jour.bande .act { width: auto; max-width: 340px; }
+.jour.bande .jour-pied { margin-left: auto; margin-top: 0; align-self: center; }
+.we.reserve .jour.bande {
+  background: var(--reserve); border: 1px solid var(--reserve-line);
+  border-left: 6px solid var(--reserve-vif);
+}
+
+/* Un jour de semaine ordinaire : un filet, present mais efface. Ce qui y a
+   ete pose depuis la vue semaine reste lisible en miniature. */
+.jour-filet {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 5px 13px; border-radius: 9px; border: 1px dashed var(--line);
+}
+.jour-filet b { font-size: 11px; font-weight: 700; color: var(--muted); }
+.jour-filet .chiffre {
+  font-size: 12px; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums;
+}
+.jour-filet .petits { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.jour-filet .mini {
+  font-size: 10px; font-weight: 800; padding: 2px 7px; border-radius: 6px; color: #fff;
+  max-width: 230px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .62;
+}
+.jour-filet .mini.gael { background: var(--gael); }
+.jour-filet .mini.ingrid { background: var(--ingrid); }
+.jour-filet .mini.thomas { background: var(--thomas); }
+.jour-filet .mini.famille { background: var(--famille); }
+.jour-filet .off i { width: 14px; height: 14px; font-size: 8.5px; opacity: .8; }
+
+/* Numero de semaine ISO, discret, devant le titre. */
+.sem-num {
+  font-size: 11px; font-weight: 800; letter-spacing: .04em; color: var(--muted);
+  font-variant-numeric: tabular-nums; flex: none;
+}
+
+.acts { display: flex; flex-direction: column; gap: 5px; }
+.act {
+  position: relative; display: flex; align-items: flex-start; gap: 7px; text-align: left; width: 100%;
+  font-size: 13px; line-height: 1.4; padding: 6px 42px 6px 10px; border-radius: 9px;
+  border: 1px solid transparent; transition: box-shadow .12s, opacity .12s; cursor: pointer;
+}
+.act:hover { box-shadow: 0 0 0 2px currentColor inset; }
+.act, .case-mois .mini {
+  -webkit-user-select: none; user-select: none;
+  -webkit-touch-callout: none;
+}
+.act.en-glissement { opacity: .3; }
+
+/* Copie de la vignette qui suit le pointeur pendant le geste. */
+.fantome {
+  position: fixed; left: 0; top: 0; z-index: 90; pointer-events: none;
+  opacity: .95; box-shadow: 0 12px 28px -10px rgba(20, 30, 40, .45);
+  transform: translate3d(-9999px, -9999px, 0);
+}
+/* Au doigt, la vignette saisie grossit un peu : c'est le seul retour possible,
+   iOS ne permettant pas de vibration depuis une page web. */
+.fantome-doigt { box-shadow: 0 14px 32px -10px rgba(20, 30, 40, .55); }
+.fantome-doigt .act, .fantome-doigt.act { outline: 2px solid var(--ink-2); outline-offset: 1px; }
+
+body.glisser-en-cours { cursor: grabbing; -webkit-user-select: none; user-select: none; }
+body.glisser-en-cours .act, body.glisser-en-cours .mini { cursor: grabbing; }
+
+/* Trait d'insertion pendant le glisser : montre où l'activité va se poser. */
+.act.insert-avant::after, .act.insert-apres::after,
+.mini.insert-avant::after, .mini.insert-apres::after {
+  content: ""; position: absolute; left: 2px; right: 2px; height: 3px;
+  background: var(--ink-2); border-radius: 2px; pointer-events: none;
+}
+.act.insert-avant::after, .mini.insert-avant::after { top: -4px; }
+.act.insert-apres::after, .mini.insert-apres::after { bottom: -4px; }
+
+.act-actions {
+  position: absolute; right: 4px; top: 3px; display: flex; gap: 1px;
+  opacity: 0; transition: opacity .12s;
+  background-color: inherit; border-radius: 999px; padding-left: 6px;
+}
+.act:hover .act-actions, .act:focus-within .act-actions, .act:focus-visible .act-actions { opacity: 1; }
+.act-actions button {
+  width: 21px; height: 21px; border-radius: 999px; display: grid; place-items: center;
+  font-size: 13px; line-height: 1; color: currentColor; opacity: .78;
+}
+.act-actions button[data-supprimer] { font-size: 17px; }
+.act-actions button[data-monter], .act-actions button[data-descendre] { font-size: 12px; }
+.act-actions button[disabled] { opacity: .2; cursor: default; }
+.act-actions button[disabled]:hover { background: none; }
+
+.act-actions button:hover { opacity: 1; background: color-mix(in srgb, currentColor 24%, transparent); }
+@media (hover: none) {
+  .act-actions { opacity: .75; }
+  .act { padding-right: 46px; }
+  .act.ordonnable { padding-right: 92px; }
+}
+.act .qui { font-weight: 800; font-size: 11px; letter-spacing: .04em; flex: none; padding-top: 1px; opacity: .78; }
+.act.gael { background: var(--gael); color: var(--sur-couleur); }
+.act.ingrid { background: var(--ingrid); color: var(--sur-couleur); }
+.act.thomas { background: var(--thomas); color: var(--sur-couleur); }
+.act.famille { background: var(--famille); color: var(--sur-couleur); }
+.act.a_confirmer { border-style: dashed; border-color: currentColor; font-style: italic; }
+.act .verrou { flex: none; opacity: .5; font-size: 10px; padding-top: 2px; }
+
+.jour-pied { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; margin-top: auto; }
+/* En vue semaine les colonnes sont etroites : un intitule long serait
+   coupe sur dix lignes et etirerait toute la rangee. On le borne, le texte
+   entier restant lisible dans l'infobulle et dans la fiche. */
+.grille7 .act .texte {
+  display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.ajouter {
+  align-self: flex-start; font-size: 12.5px; font-weight: 700; color: var(--muted);
+  padding: 3px 9px; border-radius: 999px;
+}
+.ajouter:hover { color: var(--ink); background: var(--surface-3); }
+.jour:not(:hover) .ajouter:not(:focus-visible) { opacity: .5; }
+
+.coller {
+  font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 999px;
+  color: var(--ink-2); border: 1px dashed var(--line-strong); background: var(--surface);
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.coller:hover { border-style: solid; border-color: var(--ink-2); color: var(--ink); opacity: 1; }
+.mini-coller { font-size: 10px; padding: 1px 7px; align-self: flex-start; }
+.jour:not(:hover) .coller:not(:focus-visible),
+.case-mois:not(:hover) .coller:not(:focus-visible) { opacity: .4; }
+
+.jour.survol, .case-mois.survol {
+  outline: 2px dashed var(--ink-2); outline-offset: -3px; background: var(--surface-3);
+}
+
+/* ------------------------------------------------------------- vue au mois */
+
+/* Une colonne etroite en tete pour les numeros de semaine, puis les 7 jours. */
+.bloc-mois { margin-bottom: 26px; }
+.grille-mois {
+  display: grid; grid-template-columns: 30px repeat(7, minmax(0, 1fr)); gap: 6px;
+}
+.gouttiere {
+  display: grid; place-items: center; font-size: 10.5px; font-weight: 800;
+  color: var(--muted); font-variant-numeric: tabular-nums; letter-spacing: .03em;
+}
+/* La vue mois est informative : on y clique pour ouvrir la semaine. */
+.case-mois[data-va] { cursor: pointer; }
+.case-mois[data-va]:hover { border-color: var(--line-strong); }
+.case-mois[data-va]:focus-visible { outline: 2px solid var(--ink-2); outline-offset: 1px; }
+.pt-conge { width: 6px; height: 6px; border-radius: 999px; background: var(--gael); flex: none; }
+.grille-mois .entete {
+  padding: 0 8px 4px; font-size: 11.5px; font-weight: 700; letter-spacing: .04em;
+  color: var(--muted); text-align: center;
+}
+.case-mois {
+  min-width: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-s);
+  min-height: 104px; padding: 7px 8px; display: flex; flex-direction: column; gap: 4px;
+}
+.case-mois.hors { background: transparent; border-color: transparent; opacity: .35; }
+.case-mois.semaine { background: var(--faded); border-color: transparent; }
+.case-mois.vacances { background: var(--vac); border-color: var(--vac-line); }
+.case-mois.semaine.vacances { background: color-mix(in srgb, var(--vac) 50%, var(--faded)); }
+.case-mois.reserve {
+  background: var(--reserve);
+  border: 2px solid var(--reserve-line);
+  border-left: 5px solid var(--reserve-vif);
+}
+.case-mois .num { font-size: 13px; font-weight: 700; color: var(--ink-2); display: flex; align-items: center; gap: 5px; }
+.case-mois.semaine .num, .case-mois.hors .num { color: var(--muted); font-weight: 400; }
+.case-mois .aujourdhui {
+  background: var(--ink); color: var(--surface); border-radius: 999px;
+  width: 23px; height: 23px; display: grid; place-items: center; font-size: 12px;
+}
+.case-mois .mini {
+  font-size: 11.5px; line-height: 1.35; padding: 3px 7px; border-radius: 7px; text-align: left;
+  display: block; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-weight: 700; cursor: pointer; transition: opacity .12s;
+}
+.case-mois .mini { position: relative; }
+.case-mois .mini.en-glissement { opacity: .35; }
+.case-mois .mini.gael { background: var(--gael); color: var(--sur-couleur); }
+.case-mois .mini.ingrid { background: var(--ingrid); color: var(--sur-couleur); }
+.case-mois .mini.thomas { background: var(--thomas); color: var(--sur-couleur); }
+.case-mois .mini.famille { background: var(--famille); color: var(--sur-couleur); }
+.case-mois .mini.a_confirmer { border: 1px dashed currentColor; font-style: italic; }
+.case-mois .marque-ferie { font-size: 10px; font-weight: 700; color: var(--ferie-ink); }
+.case-mois .etoile { color: var(--reserve-ink); font-size: 12px; }
+.case-mois:not(:hover) .ajouter:not(:focus-visible) { opacity: .3; }
+
+/* ----------------------------------------------------------------- modale */
+.voile {
+  position: fixed; inset: 0; background: rgba(24,34,44,.42); backdrop-filter: blur(3px);
+  display: grid; place-items: center; padding: 16px; z-index: 60;
+}
+.modale {
+  background: var(--surface); border-radius: 20px; border: 1px solid var(--line);
+  width: min(460px, 100%); box-shadow: 0 24px 60px -20px rgba(20,30,40,.35); overflow: hidden;
+}
+.modale header { padding: 18px 20px 12px; }
+.modale header h3 { font-size: 18px; font-weight: 700; letter-spacing: -.01em; }
+.modale header p { font-size: 13px; color: var(--muted); margin-top: 3px; }
+.modale header .alerte-reserve { color: var(--reserve-ink); font-weight: 700; }
+.modale .corps { padding: 4px 20px 18px; display: flex; flex-direction: column; gap: 16px; }
+.modale label { font-size: 12px; font-weight: 700; color: var(--muted); display: block; margin-bottom: 7px; }
+.pastilles { display: flex; gap: 7px; flex-wrap: wrap; }
+.pastille {
+  font-size: 13.5px; font-weight: 700; padding: 8px 16px; border-radius: 999px;
+  border: 1.5px solid var(--line-strong); color: var(--ink-2);
+}
+.pastille[aria-pressed="true"].gael { background: var(--gael-bg); border-color: var(--gael); color: var(--gael); }
+.pastille[aria-pressed="true"].ingrid { background: var(--ingrid-bg); border-color: var(--ingrid); color: var(--ingrid); }
+.pastille[aria-pressed="true"].thomas { background: var(--thomas-bg); border-color: var(--thomas); color: var(--thomas); }
+.pastille[aria-pressed="true"].famille { background: var(--famille-bg); border-color: var(--famille); color: var(--famille); }
+.modale textarea, .modale input[type="text"] {
+  width: 100%; background: var(--surface-2); border: 1.5px solid var(--line-strong);
+  border-radius: 12px; padding: 10px 12px; font-size: 14.5px; resize: vertical; min-height: 78px; color: var(--ink);
+}
+.modale textarea:focus, .modale input:focus { outline: none; border-color: var(--ink-2); }
+.interrupteur { display: flex; align-items: center; gap: 9px; font-size: 14px; color: var(--ink-2); font-weight: 600; }
+.interrupteur input { width: 17px; height: 17px; accent-color: var(--ink-2); }
+.modale footer { padding: 14px 20px; display: flex; gap: 8px; align-items: center; background: var(--surface-2); }
+.btn { font-size: 14px; font-weight: 700; padding: 9px 18px; border-radius: 999px; border: 1.5px solid transparent; }
+.btn.principal { background: var(--ink); color: var(--surface); }
+.btn.principal:hover { background: var(--ink-2); }
+.btn.discret { border-color: var(--line-strong); color: var(--ink-2); }
+.btn.discret:hover { border-color: var(--ink-2); }
+.btn.danger { color: var(--ingrid); margin-right: auto; }
+.btn.danger:hover { text-decoration: underline; }
+
+.pied { max-width: 1320px; margin: 36px auto 0; padding: 0 20px; font-size: 12.5px; color: var(--muted); }
+.legende { display: flex; flex-wrap: wrap; gap: 7px 16px; margin-bottom: 12px; }
+.legende span { display: inline-flex; align-items: center; gap: 6px; }
+.legende i { width: 11px; height: 11px; border-radius: 999px; display: inline-block; }
+
+.vide { text-align: center; padding: 56px 16px; color: var(--muted); font-size: 14.5px; }
+
+:focus-visible { outline: 2px solid var(--ink-2); outline-offset: 2px; border-radius: 6px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+/* --------------------------------------------------------------- mobile */
+@media (max-width: 900px) {
+  .bandeau-mois { gap: 4px; margin-top: 26px; }
+  .bandeau-mois .reserve-mois { margin-left: 0; flex-basis: 100%; }
+  .grille7 { grid-template-columns: 1fr; gap: 8px; }
+
+  .jour { min-height: 0; }
+  /* Un jour sans activite tient sur une seule ligne : sinon une semaine vide
+     fait sept grandes cartes a faire defiler sur le telephone. */
+  .jour:not(.plein) {
+    flex-direction: row; align-items: center; flex-wrap: wrap; gap: 9px; padding: 8px 11px;
+  }
+  .jour:not(.plein) .jour-pied { margin-left: auto; }
+  .jour:not(.plein) .acts { display: none; }
+  .bouton-conge { opacity: .45; }
+
+  .jour.bande { flex-direction: column; align-items: stretch; }
+  .jour.bande .jour-tete { width: auto; }
+  .jour.bande .acts { flex-direction: column; }
+  .jour.bande .act { width: 100%; max-width: none; }
+  .jour.bande .jour-pied { margin-left: 0; }
+  .jour.bande.plein .jour-tete { width: auto; }
+
+  .marque span { display: none; }
+  .champ-recherche input { width: 148px; }
+  .case-mois { min-height: 74px; padding: 5px; }
+  .case-mois .mini { font-size: 10px; padding: 2px 5px; }
+  .grille-mois { gap: 3px; grid-template-columns: 22px repeat(7, minmax(0, 1fr)); }
+  .gouttiere { font-size: 9px; }
+  .grille-mois .entete { font-size: 10px; padding: 0 2px 3px; }
+  .page { padding: 16px 12px 0; }
+}
+@media (max-width: 620px) {
+  .barre-in { padding: 10px 12px; gap: 8px; }
+  .onglets button { padding: 6px 12px; font-size: 13px; }
+  .marque b { font-size: 17px; }
+  .qui-suis-je label { display: none; }
+  .etat-sauvegarde { min-width: 0; }
+  /* La barre est collante : sur un telephone chaque rangee mange l'ecran.
+     Le titre est deja sur l'icone de l'ecran d'accueil, il quitte la barre. */
+  .marque { display: none; }
+  .champ-recherche { order: 3; }
+  .etat-sauvegarde { order: 5; }
+  .qui-suis-je.dans-le-pied { margin-top: 12px; }
+  .qui-suis-je.dans-le-pied label { display: inline; }
+  .grille-mois .entete { font-size: 10px; padding: 0 2px 3px; }
+  .case-mois .mini { font-size: 9.5px; padding: 2px 4px; border-radius: 5px; }
+  .case-mois .marque-ferie { font-size: 8.5px; line-height: 1.2; }
+  .case-mois .num { font-size: 11.5px; }
+    .pied { padding: 0 12px; }
+}
+
+/* ------------------------------------------------------ écran de connexion */
+.accueil { min-height: 100dvh; display: grid; place-items: center; padding: 24px; }
+.carte-connexion {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r);
+  padding: 30px 28px 26px; width: min(380px, 100%); display: flex; flex-direction: column;
+  box-shadow: 0 20px 50px -28px rgba(20, 30, 40, .35);
+}
+.carte-connexion h1 {
+  font-family: "Fredoka", sans-serif; font-weight: 700; font-size: 24px;
+  letter-spacing: -.02em; text-wrap: balance;
+}
+.carte-connexion .sous { color: var(--muted); font-size: 13.5px; margin: 4px 0 22px; }
+.carte-connexion label {
+  font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 6px;
+}
+.carte-connexion input {
+  background: var(--surface-2); border: 1.5px solid var(--line-strong); border-radius: 12px;
+  padding: 11px 13px; font-size: 15px; color: var(--ink); margin-bottom: 16px;
+}
+.carte-connexion input:focus { outline: none; border-color: var(--ink-2); }
+.carte-connexion .btn { margin-top: 4px; text-align: center; }
+.carte-connexion .btn[disabled] { opacity: .6; cursor: default; }
+.carte-connexion .erreur {
+  font-size: 13px; color: var(--ingrid); background: var(--ingrid-bg);
+  border-radius: 9px; padding: 8px 11px; margin-bottom: 14px;
+}
+
+/* --------------------------------------------------------- compte connecté */
+.pied .compte { margin-top: 8px; }
+.pied .compte b { color: var(--ink-2); font-weight: 700; }
+.lien {
+  color: var(--ink-2); font-weight: 600; text-decoration: underline;
+  text-underline-offset: 2px; font-size: inherit;
+}
+.lien:hover { color: var(--ink); }
